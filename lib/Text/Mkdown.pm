@@ -5,7 +5,7 @@ use Carp;
 use Encode;
 use parent qw(Exporter);
 
-use version; our $VERSION = '0.001';
+use version; our $VERSION = '0.002';
 # $Id$
 
 our @EXPORT_OK = qw(markdown);
@@ -21,13 +21,13 @@ my $ALNUM = q{A-Za-z0-9};
 my $NEST_PAREN = _nest_pattern(q{[^()\\n]*?(?:[(]R[)][^()\\n]*?)*}, 32);
 my $NEST_BRACKET = _nest_pattern(q{[^\\[\\]]*(?:\\[R\\][^\\[\\]]*)*}, 32);
 
-# Markdown syntax defines indent as [ ]{4,} or tab.
+# Markdown syntax defines indent as [ ]{4} or tab.
 my $TAB = qr/(?:\t|[ ](?:\t|[ ](?:\t|[ ][ \t])))/msx;
 my $PAD = qr/[ ]{0,3}/msx;
 # tokenizer in emphasis
 my $EM = qr{
-    (?: [^<\[(]+?(?:(?:<[^>]*>|\[$NEST_BRACKET\]|[(]$NEST_PAREN[)])+[^<\[(]*?)*
-    |   (?:(?:<[^>]*>|\[$NEST_BRACKET\]|[(]$NEST_PAREN[)])+[^<\[(]*?)*
+    (?: [^<\[]+?(?:(?:<[^>]*>|\[$NEST_BRACKET\](?:[(]$NEST_PAREN[)])?)+[^<\[]*?)*
+    |   (?:(?:<[^>]*>|\[$NEST_BRACKET\](?:[(]$NEST_PAREN[)])?)+[^<\[]*?)*
     )
 }msx;
 # list items
@@ -277,16 +277,16 @@ sub _inline {
                 |   (?:[ ]|\n[ ]*)? \[($NEST_BRACKET)\]         #16
                 )
             )
-        |   (?:^|(?<![\w*]))
-            (?: [*][*]([*_]*(?![\s.,?])$EM(?<![\s*])[*]*)[*][*] #17
-            |   [*]([*_]*(?![\s.,?])$EM(?<![\s*])[*]*)[*]       #18
+        |   (?=\A|(?<=\s))
+            (?: [*][*]([*_]*(?![\s.,;:!?])$EM(?<![\s*])[*]*)[*][*] #17
+            |   [*]([*_]*(?![\s.,;:!?])$EM(?<![\s*])[*]*)[*]       #18
             )
-            (?=$|[^\w*])
-        |   (?:^|(?<![\w_]))
-            (?: [_][_]([_*]*(?![\s.,?])$EM(?<![\s_])[_]*)[_][_] #19
-            |   [_]([_*]*(?![\s.,?])$EM(?<![\s_])[_]*)[_]       #20
+            (?=\z|[^\w*])
+        |   (?=\A|(?<=\s))
+            (?: [_][_]([_*]*(?![\s.,;:!?])$EM(?<![\s_])[_]*)[_][_] #19
+            |   [_]([_*]*(?![\s.,;:!?])$EM(?<![\s_])[_]*)[_]       #20
             )
-            (?=$|[^\w_])
+            (?=\z|[^\w_])
         )
     }gcmsx) {
         if ($1 ne q{}) {
@@ -327,12 +327,16 @@ sub _inline {
             $result .= $e || $self->escape_html($9);
         }
         elsif (defined $17 || defined $19) {
-            my $t = $self->_inline(defined $17 ? $17 : $19);
-            $result .= qq{<strong>$t</strong>};
+            my($mark, $text) = defined $17 ? (q{**}, $17) : (q{__}, $19);
+            my $t = $self->_inline($text, %already, 'strong' => 1);
+            $result .= exists $already{'strong'} ? $mark . $t . $mark
+                : qq{<strong>$t</strong>};
         }
         elsif (defined $18 || defined $20) {
-            my $t = $self->_inline(defined $18 ? $18 : $20);
-            $result .= qq{<em>$t</em>};
+            my($mark, $text) = defined $18 ? (q{*}, $18) : (q{_}, $20);
+            my $t = $self->_inline($text, %already, 'em' => 1);
+            $result .= exists $already{'em'} ? $mark . $t . $mark
+                : qq{<em>$t</em>};
         }
     }
     return $result;
@@ -360,7 +364,7 @@ sub _anchor_or_img {
         return qq{<img src="$uri" alt="$alt"$title />};
     }
     else {
-        my $text = $self->_inline($param->{'text'}, 'anchor' => 1);
+        my $text = $self->_inline($param->{'text'}, %already, 'anchor' => 1);
         return qq{<a href="$uri"$title>$text</a>};
     }
 }
@@ -387,7 +391,7 @@ Text::Mkdown - Core Markdown to XHTML text converter.
 
 =head1 VERSION
 
-0.001
+0.002
 
 =head1 SYNOPSIS
 
