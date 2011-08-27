@@ -10,41 +10,55 @@ use version; our $VERSION = '0.001';
 
 our @EXPORT_OK = qw(markdown);
 
-my $TAB = qr/(?:\t|[ ](?:\t|[ ](?:\t|[ ][ \t])))/msx;
-my $PAD = qr/[ ]{0,3}/msx;
+# character class stay under [:ascii:] before perl version 5.14
+my $LOWER = q{a-z};
+my $ALPHA = q{A-Za-z};
+my $DIGIT = q{0-9};
+my $XDIGIT = q{0-9A-Fa-f};
+my $ALNUM = q{A-Za-z0-9};
+
+# upto 32 level nested parens or brackets
 my $NEST_PAREN = _nest_pattern(q{[^()\\n]*?(?:[(]R[)][^()\\n]*?)*}, 32);
 my $NEST_BRACKET = _nest_pattern(q{[^\\[\\]]*(?:\\[R\\][^\\[\\]]*)*}, 32);
+
+# Markdown syntax defines indent as [ ]{4,} or tab.
+my $TAB = qr/(?:\t|[ ](?:\t|[ ](?:\t|[ ][ \t])))/msx;
+my $PAD = qr/[ ]{0,3}/msx;
+# tokenizer in emphasis
 my $EM = qr{
     (?: [^<\[(]+?(?:(?:<[^>]*>|\[$NEST_BRACKET\]|[(]$NEST_PAREN[)])+[^<\[(]*?)*
     |   (?:(?:<[^>]*>|\[$NEST_BRACKET\]|[(]$NEST_PAREN[)])+[^<\[(]*?)*
     )
 }msx;
+# list items
+my $HRULE = qr{(?:(?:[*][ ]*){3,}|(?:[-][ ]*){3,}|(?:[_][ ]*){3,}) \n}msx;
+my $ULITEM = qr{$PAD (?! $HRULE) [*+-][ \t]+}msx;
+my $OLITEM = qr{$PAD [$DIGIT]+[.][ \t]+}msx;
+my $ITEMWRAP = qr{(?:(?! $PAD (?:[*+-]|[$DIGIT]+[.])[ \t]+) [^\n]+ \n)*}msx;
+my $LINEWRAP = qr{(?:[^\n]+ \n)*}msx;
+# html specific patterns
 my $BLOCKTAG = qr{
     blockquote|d(?:el|iv|l)|f(?:i(?:eldset|gure)|orm)|h[1-6]|i(?:frame|ns)
 |   math|noscript|ol|p(?:re)?|script|table|ul
 }msx;
 my $HTML5_ATTR = qr{
-    (?: [ \t\n]+ [a-zA-Z][a-zA-Z0-9_:-]+ [ \t\n]*
+    (?: [ \t\n]+
+        [$ALPHA][-_:$ALNUM]+ [ \t\n]*
         (?:[=] [ \t\n]* (?:"[^"]*"|'[^']*'|`[^`]*`|[^\x00-\x20<>"'`=\x70]+))?
     )*
 }msx;
 my $HTML5_TAG = qr{
     <
-    (?: [a-zA-Z][a-zA-Z0-9_:-]+ $HTML5_ATTR [ \t\n]* /?>
-    |   / [a-zA-Z][a-zA-Z0-9_:-]+ [ \t\n]* >
+    (?: [$ALPHA][-_:$ALNUM]+ $HTML5_ATTR [ \t\n]* /?>
+    |   / [$ALPHA][-_:$ALNUM]+ [ \t\n]* >
     |   !-- .*? -->
     )
 }msx;
-my $HRULE = qr{(?:(?:[*][ ]*){3,}|(?:[-][ ]*){3,}|(?:[_][ ]*){3,}) \n}msx;
-my $ULITEM = qr{$PAD (?! $HRULE) [*+-][ \t]+}msx;
-my $OLITEM = qr{$PAD [0-9]+[.][ \t]+}msx;
-my $ITEMWRAP = qr{(?:(?! $PAD (?:[*+-]|[0-9]+[.])[ \t]+) [^\n]+ \n)*}msx;
-my $LINEWRAP = qr{(?:[^\n]+ \n)*}msx;
 my %HTML5_SPECIAL = (
     q{&} => q{&amp;}, q{<} => q{&lt;}, q{>} => q{&gt;},
     q{"} => q{&quot;}, q{'} => q{&#39;}, q{`} => q{&#96;}, q{\\} => q{&#92;},
 );
-my $AMP = qr{(?:[a-zA-Z_][a-zA-Z0-9_]*|\#(?:[0-9]{1,5}|x[0-9a-fA-F]{2,4}))}msx;
+my $AMP = qr{(?:[$ALPHA][$ALNUM]*|\#(?:[$DIGIT]{1,5}|x[$XDIGIT]{2,4}))}msx;
 
 sub markdown {
     my($arg0, @arg) = @_;
@@ -82,7 +96,7 @@ sub escape_uri {
     if (utf8::is_utf8($uri)) {
         $uri = Encode::encode('utf-8', $uri);
     }
-    $uri =~ s{(?:(%([0-9A-Fa-f]{2})?)|(&(?:amp;)?)|([^A-Za-z0-9\-_~&*+=/.!,;:?\#]))}{
+    $uri =~ s{(?:(%([$XDIGIT]{2})?)|(&(?:amp;)?)|([^$ALNUM\-_~&*+=/.!,;:?\#]))}{
         $2 ? $1 : $1 ? '%25' : $3 ? '&amp;' : sprintf '%%%02X', ord $4
     }egmosx;
     return $uri;
@@ -169,7 +183,7 @@ sub _block {
             |   ([^\n]+?) [ \t]* \n $PAD (=+|-+) [ \t]* \n
             |   () $HRULE
             |   (> [^\n]* \n $LINEWRAP (?:\n* $PAD> [^\n]* \n $LINEWRAP)*)
-            |   ([*+-]|[0-9]+[.])[ \t]+ ([^\n]+ \n)
+            |   ([*+-]|[$DIGIT]+[.])[ \t]+ ([^\n]+ \n)
             |   ([^\n]+ \n)
             )
         )
@@ -245,7 +259,7 @@ sub _block {
 }
 
 sub _inline {
-    my($self, $src, $in_anchor) = @_;
+    my($self, $src, %already) = @_;
     my $result = q{};
     ## no critic qw(EscapedMetacharacters)
     while ($src =~ m{\G
@@ -254,7 +268,7 @@ sub _inline {
         |   \\([\\`*_<>\{\}\[\]()\#+\-.!])          #3
         |   (`+)[ \t]*(.+?)[ \t]*(?<!`)\4(?!`)      #4,5
         |   <((?:https?|ftp):[^'">\s]+)>            #6
-        |   <(?:mailto:)?([-.\w\+]+\@[-\w]+(?:[.][-\w]+)*[.][a-z]+)> #7
+        |   <(?:mailto:)?([-.\w\+]+\@[-\w]+(?:[.][-\w]+)*[.][$LOWER]+)> #7
         |   ($HTML5_TAG)                            #8
         |   (   (!)?\[($NEST_BRACKET)\]                         #9,10,11
                 (?: [(]  [ \t]* (?:<([^>]*?)>|($NEST_PAREN))    #12,13
@@ -264,13 +278,13 @@ sub _inline {
                 )
             )
         |   (?:^|(?<![\w*]))
-            (?: [*][*]([*]*(?![\s.,?])$EM(?<![\s*])[*]*)[*][*]  #17
-            |   [*]((?![\s.,?*])$EM(?<![\s*])[*]*)[*]           #18
+            (?: [*][*]([*_]*(?![\s.,?])$EM(?<![\s*])[*]*)[*][*] #17
+            |   [*]([*_]*(?![\s.,?])$EM(?<![\s*])[*]*)[*]       #18
             )
             (?=$|[^\w*])
         |   (?:^|(?<![\w_]))
-            (?: [_][_]([_]*(?![\s.,?])$EM(?<![\s_])[_]*)[_][_]  #19
-            |   [_]((?![\s.,?_])$EM(?<![\s*])[_]*)[_]           #20
+            (?: [_][_]([_*]*(?![\s.,?])$EM(?<![\s_])[_]*)[_][_] #19
+            |   [_]([_*]*(?![\s.,?])$EM(?<![\s_])[_]*)[_]       #20
             )
             (?=$|[^\w_])
         )
@@ -303,14 +317,13 @@ sub _inline {
             $result .= $8;
         }
         elsif (defined $9) {
-            my $e = $self->_anchor_or_img(
+            my $e = $self->_anchor_or_img({
                 'img' => $10,
                 'text' => $11,
                 'uri' => defined $12 ? $12 : $13,
                 'title' => defined $14 ? $14 : $15,
                 'id' => $16,
-                'in_anchor' => $in_anchor,
-            );
+            }, %already);
             $result .= $e || $self->escape_html($9);
         }
         elsif (defined $17 || defined $19) {
@@ -326,12 +339,12 @@ sub _inline {
 }
 
 sub _anchor_or_img {
-    my($self, %param) = @_;
-    return if ! $param{'img'} && $param{'in_anchor'};
-    my($uri, $title) = @param{'uri', 'title'};
-    if (! defined $param{'uri'}) {
-        my $id = $param{'id'};
-        $id = defined $id && $id ne q{} ? $id : $param{'text'};
+    my($self, $param, %already) = @_;
+    return if ! $param->{'img'} && exists $already{'anchor'};
+    my($uri, $title) = @{$param}{'uri', 'title'};
+    if (! defined $param->{'uri'}) {
+        my $id = $param->{'id'};
+        $id = defined $id && $id ne q{} ? $id : $param->{'text'};
         $id = lc $id;
         $id =~ s{[ \t]*\n}{ }gmsx;
         if (exists $self->{'.links'}{$id}) {
@@ -342,12 +355,12 @@ sub _anchor_or_img {
     $uri = $self->escape_uri($uri);
     $title = ! defined $title ? q{}
         : q{ title="} . $self->escape_html($title) . q{"};
-    if ($param{'img'}) {
-        my $alt = $self->escape_html($param{'text'});
+    if ($param->{'img'}) {
+        my $alt = $self->escape_html($param->{'text'});
         return qq{<img src="$uri" alt="$alt"$title />};
     }
     else {
-        my $text = $self->_inline($param{'text'}, 'anchor');
+        my $text = $self->_inline($param->{'text'}, 'anchor' => 1);
         return qq{<a href="$uri"$title>$text</a>};
     }
 }
