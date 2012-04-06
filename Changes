@@ -1,5 +1,8 @@
 Revision history for Text-Mkdown
 
+0.003   Fri Apr  6 13:18:57 2012 GMT
+    ! code cleaning.
+
 0.002   Sat Aug 27 12:08:32 2011 GMT
     ! keep double astrisks or double underscores: <strong>a **b** c</strong>.
     ! keep an astrisk or a underscore: <em>a *b* c</em>.

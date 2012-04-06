@@ -5,7 +5,7 @@ use Carp;
 use Encode;
 use parent qw(Exporter);
 
-use version; our $VERSION = '0.002';
+use version; our $VERSION = '0.003';
 # $Id$
 
 our @EXPORT_OK = qw(markdown);
@@ -32,10 +32,10 @@ my $EM = qr{
 }msx;
 # list items
 my $HRULE = qr{(?:(?:[*][ ]*){3,}|(?:[-][ ]*){3,}|(?:[_][ ]*){3,}) \n}msx;
-my $ULITEM = qr{$PAD (?! $HRULE) [*+-][ \t]+}msx;
-my $OLITEM = qr{$PAD [$DIGIT]+[.][ \t]+}msx;
-my $ITEMWRAP = qr{(?:(?! $PAD (?:[*+-]|[$DIGIT]+[.])[ \t]+) [^\n]+ \n)*}msx;
-my $LINEWRAP = qr{(?:[^\n]+ \n)*}msx;
+my $ULMARK = qr{$PAD (?! $HRULE) [*+-][ \t]+}msx;
+my $OLMARK = qr{$PAD [$DIGIT]+[.][ \t]+}msx;
+my $ITEM = qr{(?:(?! $PAD (?:[*+-]|[$DIGIT]+[.])[ \t]+) [^\n]+ \n)*}msx;
+my $LINES = qr{(?:[^\n]+ \n)*}msx;
 # html specific patterns
 my $BLOCKTAG = qr{
     blockquote|d(?:el|iv|l)|f(?:i(?:eldset|gure)|orm)|h[1-6]|i(?:frame|ns)
@@ -58,7 +58,11 @@ my %HTML5_SPECIAL = (
     q{&} => q{&amp;}, q{<} => q{&lt;}, q{>} => q{&gt;},
     q{"} => q{&quot;}, q{'} => q{&#39;}, q{`} => q{&#96;}, q{\\} => q{&#92;},
 );
-my $AMP = qr{(?:[$ALPHA][$ALNUM]*|\#(?:[$DIGIT]{1,5}|x[$XDIGIT]{2,4}))}msx;
+my $AMP = qr{
+    (?: [$ALPHA][$ALNUM]*
+    |   \#(?:[$DIGIT]{1,10}|x[$XDIGIT]{2,8})
+    )
+}msx;
 
 sub markdown {
     my($arg0, @arg) = @_;
@@ -162,8 +166,7 @@ sub _toplevel {
 }
 
 sub _block {
-    my($self, $src, $in_li_flow) = @_;
-    my $paragraph = $in_li_flow ? $ITEMWRAP : $LINEWRAP;
+    my($self, $src, $in_flow) = @_;
     $src =~ s/^[ \t]+$//gmsx;
     $src = "\n\n" . $src . "\n\n";
     my $result = q{};
@@ -182,29 +185,29 @@ sub _block {
             (?: (\#{1,6})\#* [ \t]* ([^\n]+?) [ \t]* (?:\#+ [ \t]*)? \n
             |   ([^\n]+?) [ \t]* \n $PAD (=+|-+) [ \t]* \n
             |   () $HRULE
-            |   (> [^\n]* \n $LINEWRAP (?:\n* $PAD> [^\n]* \n $LINEWRAP)*)
+            |   (> [^\n]* \n $LINES (?:\n* $PAD> [^\n]* \n $LINES)*)
             |   ([*+-]|[$DIGIT]+[.])[ \t]+ ([^\n]+ \n)
             |   ([^\n]+ \n)
             )
         )
     }gcmsx) {
         next if defined $1;
-        if (! $in_li_flow && $result ne q{} && "\n" ne substr $result, -1) {
+        if (! $in_flow && $result ne q{} && "\n" ne substr $result, -1) {
             $result .= "\n";
         }
         if (defined $13) {
             my $inline = $13;
-            if ($src =~ m{\G($paragraph)}gcmsx) {
+            if ($in_flow) {
+                if ($src =~ m{\G($ITEM)}gcmsx) {
+                    $inline .= $1;
+                }
+            }
+            elsif ($src =~ m{\G($LINES)}gcmsx) {
                 $inline .= $1;
             }
             chomp $inline;
             my $t = $self->_inline($inline);
-            if ($in_li_flow) {
-                $result .= $t;
-            }
-            else {
-                $result .= qq{<p>$t</p>\n};
-            }
+            $result .= $in_flow ? $t : qq{<p>$t</p>\n};
         }
         elsif (defined $2) {
             $result .= $2;
@@ -229,31 +232,31 @@ sub _block {
             $result .= qq{<hr />\n};
         }
         elsif (defined $10) {
-            my $flow = $10;
-            $flow =~ s/^[ ]{0,3}>[ \t]?//gmsx;
-            my $t = $self->_block($flow);
+            my $data = $10;
+            $data =~ s/^[ ]{0,3}>[ \t]?//gmsx;
+            my $t = $self->_block($data);
             $result .= qq{<blockquote>\n$t</blockquote>\n};
         }
         elsif (defined $11) {
-            my $inline = $12;
+            my $data = $12;
             my $list = length $11 == 1 ? 'ul' : 'ol';
             $result .= qq{<$list>\n};
-            my $limark = $list eq 'ul' ? $ULITEM : $OLITEM;
+            my $limark = $list eq 'ul' ? $ULMARK : $OLMARK;
             while (1) {
                 if ($src =~ m{\G
-                    ($ITEMWRAP (?:\n+ $TAB [^\n]+ \n $ITEMWRAP)*)
+                    ($ITEM (?:\n+ $TAB [^\n]+ \n $ITEM)*)
                 }gcmsx) {
-                    $inline .= $1;
+                    $data .= $1;
                 }
-                $inline =~ s/^$TAB//gmsx;
-                my $t = $self->_block($inline, 'flow');
+                $data =~ s/^$TAB//gmsx;
+                my $t = $self->_block($data, 'flow');
                 $result .= qq{<li>$t</li>\n};
                 last if $src !~ m{\G \n* $limark ([^\n]+ \n)}gcmsx;
-                $inline = $1; ## no critic qw(CaptureWithoutTest)
+                $data = $1; ## no critic qw(CaptureWithoutTest)
             }
             $result .= qq{</$list>\n};
         }
-        $in_li_flow = 0;
+        $in_flow = 0;
     }
     return $result;
 }
@@ -356,6 +359,7 @@ sub _anchor_or_img {
         }
     }
     return if ! defined $uri;
+    $uri =~ s/\$1/$param->{'text'}/egmsx;
     $uri = $self->escape_uri($uri);
     $title = ! defined $title ? q{}
         : q{ title="} . $self->escape_html($title) . q{"};
@@ -391,7 +395,7 @@ Text::Mkdown - Core Markdown to XHTML text converter.
 
 =head1 VERSION
 
-0.002
+0.003
 
 =head1 SYNOPSIS
 
@@ -460,7 +464,7 @@ MIZUTANI Tociyuki  C<< <tociyuki@gmail.com> >>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (c) 2011, MIZUTANI Tociyuki C<< <tociyuki@gmail.com> >>.
+Copyright (c) 2012, MIZUTANI Tociyuki C<< <tociyuki@gmail.com> >>.
 All rights reserved.
 
 This module is free software; you can redistribute it and/or

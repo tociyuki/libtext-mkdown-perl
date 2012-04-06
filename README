@@ -1,4 +1,4 @@
-Text-Mkdown version 0.002
+Text-Mkdown version 0.003
 
 Converts basic Markdown text to XHTML one.
 This is alternative implementation from the orignal Text::Markdown.
