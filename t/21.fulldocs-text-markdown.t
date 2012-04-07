@@ -63,14 +63,14 @@ sub run_test {
         next;
     }
     $output =~ s/\s+\z//; # trim trailing whitespace
-    my $processed = $m->markdown($input);
+    my $processed = encode('UTF-8', $m->markdown(decode('UTF-8', $input)));
     $processed =~ s/\s+\z//; # trim trailing whitespace
 
     # Un-comment for debugging if you have space diffs you can't see..
-    $output =~ s/ /&nbsp;/g;
-    $output =~ s/\t/&tab;/g;
-    $processed =~ s/ /&nbsp;/g;
-    $processed =~ s/\t/&tab;/g;
+    #$output =~ s/ /&nbsp;/g;
+    #$output =~ s/\t/&tab;/g;
+    #$processed =~ s/ /&nbsp;/g;
+    #$processed =~ s/\t/&tab;/g;
     
     if (0 <= index $test, 'todo') {
         TODO: {
