@@ -24,6 +24,8 @@ my $NEST_BRACKET = _nest_pattern(q{[^\\[\\]]*(?:\\[R\\][^\\[\\]]*)*}, 6);
 # Markdown syntax defines indent as [ ]{4} or tab.
 my $TAB = qr/(?:\t|[ ](?:\t|[ ](?:\t|[ ][ \t])))/msx;
 my $PAD = qr/[ ]{0,3}/msx;
+# Instead of specification: letters, numbers, spaces, and punctuation
+my $LINK_LABEL = qr{[^\P{Graph}\[\]]+(?:\s+[^\P{Graph}\[\]]+)*}msx;
 # list items
 my $HRULE = qr{(?:(?:[*][ ]*){3,}|(?:[-][ ]*){3,}|(?:[_][ ]*){3,}) \n}msx;
 my $ULMARK = qr{$PAD (?! $HRULE) [*+-][ \t]+}msx;
@@ -71,7 +73,7 @@ sub markdown {
     $src = "\n\n" . $src . "\n\n";
     while ($src =~ s{
         ^$PAD
-        \[($NEST_BRACKET)\]: [ \t]+ (?:<(\S+?)>|(\S+))
+        \[($LINK_LABEL)\]: [ \t]+ (?:<(\S+?)>|(\S+))
         (?: (?:[ \t]+(?:\n[ \t]*)?|\n[ \t]*)
             (?:"([^\n]*)"|'([^\n]*)'|[(]($NEST_PAREN)[)])
         )? [ \t]* \n
@@ -254,7 +256,7 @@ sub _iilex {
         |   ([!]?)\[($NEST_BRACKET)\]       #7:link #8:link
             (   [(]  [ \t]* (?:<([^>]*?)>|($NEST_PAREN))   #9:link #10:link #11:link
                 (?:[ \t]+ (?:"(.*?)"|'(.*?)'))? [ \t]* [)]  #12:link #13:link
-            |   (?:[ \t]|\n[ \t]*)? \[($NEST_BRACKET)\]     #14:link
+            |   (?:[ \t]|\n[ \t]*)? \[((?:$LINK_LABEL)?)\]     #14:link
             )
         )
     }gcmosx) {
