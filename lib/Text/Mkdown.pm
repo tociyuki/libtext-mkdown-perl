@@ -17,7 +17,7 @@ my $DIGIT = q{0-9};
 my $XDIGIT = q{0-9A-Fa-f};
 my $ALNUM = q{A-Za-z0-9};
 
-# upto 32 level nested parens or brackets
+# upto 6 level nested parens or brackets
 my $NEST_PAREN = _nest_pattern(q{[^()\\n]*?(?:[(]R[)][^()\\n]*?)*}, 6);
 my $NEST_BRACKET = _nest_pattern(q{[^\\[\\]]*(?:\\[R\\][^\\[\\]]*)*}, 6);
 
