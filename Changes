@@ -1,5 +1,8 @@
 Revision history for Text-Mkdown
 
+0.006   Wed Apr 18 11:10:43 2012
+    ! markup emphasis correctly.
+
 0.005   Wed Apr 18 10:32:30 2012
     ! use POSIX character class in Regular expressions.
 

@@ -25,7 +25,7 @@ sub get_files {
     my ($docsdir) = @_;
     my $DH;
     opendir($DH, $docsdir) or die("Could not open $docsdir");
-    my %files = map { s/\.(xhtml|html|text)$// ? ($_ => 1) : (); } readdir($DH);
+    my %files = map { s/\.(xhtml|html|text)\z// ? ($_ => 1) : (); } readdir($DH);
     closedir($DH);
     return sort keys %files;
 }
