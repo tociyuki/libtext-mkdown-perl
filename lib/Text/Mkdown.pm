@@ -1,36 +1,29 @@
 package Text::Mkdown;
 use strict;
 use warnings;
+use 5.008001;
 use Carp;
 use Encode;
 use parent qw(Exporter);
 
-use version; our $VERSION = '0.004';
+use version; our $VERSION = '0.005';
 # $Id$
 
 our @EXPORT_OK = qw(markdown);
 
-# character class stay under [:ascii:] before perl version 5.14
-my $LOWER = q{a-z};
-my $ALPHA = q{A-Za-z};
-my $DIGIT = q{0-9};
-my $XDIGIT = q{0-9A-Fa-f};
-my $ALNUM = q{A-Za-z0-9};
-
 # upto 6 level nested parens or brackets
 my $NEST_PAREN = _nest_pattern(q{[^()\\n]*?(?:[(]R[)][^()\\n]*?)*}, 6);
 my $NEST_BRACKET = _nest_pattern(q{[^\\[\\]]*(?:\\[R\\][^\\[\\]]*)*}, 6);
-
 # Markdown syntax defines indent as [ ]{4} or tab.
 my $TAB = qr/(?:\t|[ ](?:\t|[ ](?:\t|[ ][ \t])))/msx;
 my $PAD = qr/[ ]{0,3}/msx;
 # Instead of specification: letters, numbers, spaces, and punctuation
 my $LINK_LABEL = qr{[^\P{Graph}\[\]]+(?:\s+[^\P{Graph}\[\]]+)*}msx;
 # list items
-my $HRULE = qr{(?:(?:[*][ ]*){3,}|(?:[-][ ]*){3,}|(?:[_][ ]*){3,}) \n}msx;
+my $HRULE = qr{(?:(?:[*][ \t]*){3,}|(?:[-][ \t]*){3,}|(?:[_][ \t]*){3,}) \n}msx;
 my $ULMARK = qr{$PAD (?! $HRULE) [*+-][ \t]+}msx;
-my $OLMARK = qr{$PAD [$DIGIT]+[.][ \t]+}msx;
-my $ITEM = qr{(?:(?! $PAD (?:[*+-]|[$DIGIT]+[.])[ \t]+) [^\n]+ \n)*}msx;
+my $OLMARK = qr{$PAD [[:digit:]]+[.][ \t]+}msx;
+my $ITEM = qr{(?:(?! $PAD (?:[*+-]|[[:digit:]]+[.])[ \t]+) [^\n]+ \n)*}msx;
 my $LINES = qr{(?:[^\n]+ \n)*}msx;
 # html specific patterns
 my $BLOCKTAG = qr{
@@ -39,14 +32,14 @@ my $BLOCKTAG = qr{
 }msx;
 my $HTML5_ATTR = qr{
     (?: [ \t\n]+
-        [$ALPHA][-_:$ALNUM]+ [ \t\n]*
-        (?:[=] [ \t\n]* (?:"[^"]*"|'[^']*'|`[^`]*`|[^\x00-\x20<>"'`=\x70]+))?
+        [[:alpha:]][-_:[:alnum:]]* [ \t\n]*
+        (?:[=] [ \t\n]* (?:"[^"]*"|'[^']*'|`[^`]*`|[^\P{Graph}<>"'`=]+))?
     )*
 }msx;
 my $HTML5_TAG = qr{
     <
-    (?: [$ALPHA][-_:$ALNUM]+ $HTML5_ATTR [ \t\n]* /?>
-    |   / [$ALPHA][-_:$ALNUM]+ [ \t\n]* >
+    (?: [[:alpha:]][-_:[:alnum:]]* $HTML5_ATTR [ \t\n]* /?>
+    |   / [[:alpha:]][-_:[:alnum:]]* [ \t\n]* >
     |   !-- .*? -->
     )
 }msx;
@@ -55,8 +48,8 @@ my %HTML5_SPECIAL = (
     q{"} => q{&quot;}, q{'} => q{&#39;}, q{`} => q{&#96;}, q{\\} => q{&#92;},
 );
 my $AMP = qr{
-    (?: [$ALPHA][$ALNUM]*
-    |   \#(?:[$DIGIT]{1,10}|x[$XDIGIT]{2,8})
+    (?: [[:alpha:]][[:alnum:]]*
+    |   \#(?:[[:digit:]]{1,10}|x[[:xdigit:]]{2,8})
     )
 }msx;
 
@@ -70,7 +63,8 @@ sub markdown {
     my($self, $src) = @_ == 1 ? (__PACKAGE__->new, $_[0]) : @_;
     $self->{'links'} = {};
     $src =~ s/(?:\r\n?|\n)/\n/gmsx;
-    $src = "\n\n" . $src . "\n\n";
+    chomp $src;
+    $src .= "\n";
     while ($src =~ s{
         ^$PAD
         \[($LINK_LABEL)\]: [ \t]+ (?:<(\S+?)>|(\S+))
@@ -111,7 +105,7 @@ sub escape_uri {
     if (utf8::is_utf8($uri)) {
         $uri = Encode::encode('utf-8', $uri);
     }
-    $uri =~ s{(?:(%([$XDIGIT]{2})?)|(&(?:amp;)?)|([^$ALNUM\-_~&*+=/.!,;:?\#]))}{
+    $uri =~ s{(?:(%([[:xdigit:]]{2})?)|(&(?:amp;)?)|([^[:alnum:]\-_~&*+=/.!,;:?\#]))}{
         $2 ? $1 : $1 ? '%25' : $3 ? '&amp;' : sprintf '%%%02X', ord $4
     }egmosx;
     return $uri;
@@ -135,7 +129,7 @@ sub _block {
     $src = "\n\n" . $src . "\n\n";
     my $result = q{};
     while ($src =~ m{\G
-        (?: (\n+)
+        (?: ((?:[ \t]*\n)+)
         |   (?<=\n\n)
             (   <  (?: ($BLOCKTAG) $HTML5_ATTR [ \t\n]*>.*?</\3[ \t\n]*>
                 |   hr $HTML5_ATTR [ \t\n]* /?>
@@ -144,13 +138,13 @@ sub _block {
                 [ \t]*\n
             )
             \n
-        |   ((?:$TAB [^\n]* \n)+ (?:\n+ (?:$TAB [^\n]* \n)+)*)
+        |   ((?:$TAB [^\n]+\n)+ (?:\n+ (?:$TAB [^\n]+\n)+)*)
         |   $PAD
             (?: (\#{1,6})\#* [ \t]* ([^\n]+?) [ \t]* (?:\#+ [ \t]*)? \n
             |   ([^\n]+?) [ \t]* \n $PAD (=+|-+) [ \t]* \n
             |   () $HRULE
             |   (> [^\n]* \n $LINES (?:\n* $PAD> [^\n]* \n $LINES)*)
-            |   ([*+-]|[$DIGIT]+[.])[ \t]+ ([^\n]+ \n)
+            |   ([*+-]|[[:digit:]]+[.])[ \t]+ ([^\n]+ \n)
             |   ([^\n]+ \n)
             )
         )
@@ -281,14 +275,14 @@ sub _iilex {
             next;
         }
         if ($7 || ! $already{'link'}) {
-            if (defined $14 and
-                my $r = $14 ne q() ? $ref->{_id(lc $14)} : $ref->{_id(lc $8)}
-            ) {
+            my $r = ! defined $14 ? undef
+                : $14 ne q() ? $ref->{_id(lc $14)} : $ref->{_id(lc $8)};
+            if ($r) {
                 $self->_iilink($c, $7, $8, $r->[0], $r->[1], %already);
                 next;
             }
-            if (defined $10 || defined $11) {
-                my $link = defined $10 ? $10 : $11;
+            my $link = defined $10 ? $10 : $11;
+            if (defined $link) {
                 my $title = defined $12 ? $12 : $13;
                 $self->_iilink($c, $7, $8, $link, $title, %already);
                 next;
@@ -310,7 +304,7 @@ sub _iitag {
         # do nothing
     }
     elsif ($tag =~ m{
-        <(?:mailto:)?([-.\w+]+\@[-\w]+(?:[.][-\w]+)*[.][$LOWER]+)>
+        <(?:mailto:)?([-.\w+]+\@[-\w]+(?:[.][-\w]+)*[.][[:lower:]]+)>
     }msx) {
         my $href = 'mailto:' . $1;
         my $text = $1;
@@ -374,7 +368,7 @@ Text::Mkdown - Core Markdown to XHTML text converter.
 
 =head1 VERSION
 
-0.004
+0.005
 
 =head1 SYNOPSIS
 

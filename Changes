@@ -1,5 +1,8 @@
 Revision history for Text-Mkdown
 
+0.005   Wed Apr 18 10:32:30 2012
+    ! use POSIX character class in Regular expressions.
+
 0.004   Sat Apr  7 15:29:14 2012 GMT
     ! rewrite inline formatter.
 
