@@ -1,5 +1,8 @@
 Revision history for Text-Mkdown
 
+0.007   Thu Apr 19 09:07:32 2012
+    ! shorten emphasis regular expression.
+
 0.006   Wed Apr 18 11:10:43 2012
     ! markup emphasis correctly.
 
