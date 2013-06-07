@@ -1,5 +1,8 @@
 Revision history for Text-Mkdown
 
+0.008   Fri Jun  7 02:16:49 2013
+    ! write down character set insteads of POSIX notations.
+
 0.007   Thu Apr 19 09:07:32 2012
     ! shorten emphasis regular expression.
 

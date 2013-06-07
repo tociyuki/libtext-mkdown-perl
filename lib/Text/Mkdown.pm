@@ -6,10 +6,16 @@ use Carp;
 use Encode;
 use parent qw(Exporter);
 
-use version; our $VERSION = '0.007';
+use version; our $VERSION = '0.008';
 # $Id$
 
 our @EXPORT_OK = qw(markdown);
+
+my $ALNUM = 'A-Za-z0-9';
+my $ALPHA = 'A-Za-z';
+my $LOWER = 'a-z';
+my $DIGIT = '0-9';
+my $XDIGIT = '0-9A-Fa-f';
 
 # upto 6 level nested parens or brackets
 my $NEST_PAREN = _nest_pattern(q{[^()\\n]*?(?:[(]R[)][^()\\n]*?)*}, 6);
@@ -20,26 +26,26 @@ my $PAD = qr/[ ]{0,3}/msx;
 # Instead of specification: letters, numbers, spaces, and punctuation
 my $LINK_LABEL = qr{[^\P{Graph}\[\]]+(?:\s+[^\P{Graph}\[\]]+)*}msx;
 # list items
-my $HRULE = qr{(?:(?:[*][ \t]*){3,}|(?:[-][ \t]*){3,}|(?:[_][ \t]*){3,}) \n}msx;
+my $HRULE = qr{(?:(?:[*][ \t]*){3,}|(?:[-][ \t]*){3,}|(?:[_][ \t]*){3,})\n}msx;
 my $ULMARK = qr{$PAD (?! $HRULE) [*+-][ \t]+}msx;
-my $OLMARK = qr{$PAD [[:digit:]]+[.][ \t]+}msx;
-my $ITEM = qr{(?:(?! $PAD (?:[*+-]|[[:digit:]]+[.])[ \t]+) [^\n]+ \n)*}msx;
-my $LINES = qr{(?:[^\n]+ \n)*}msx;
+my $OLMARK = qr{$PAD [$DIGIT]+[.][ \t]+}msx;
+my $ITEM = qr{(?:(?! $PAD (?:[*+-]|[$DIGIT]+[.])[ \t]+) [^\n]+\n)*}msx;
+my $LINES = qr{(?:[^\n]+\n)*}msx;
 # html specific patterns
 my $BLOCKTAG = qr{
     blockquote|d(?:el|iv|l)|f(?:i(?:eldset|gure)|orm)|h[1-6]|i(?:frame|ns)
-|   math|noscript|ol|p(?:re)?|script|table|ul
+    |math|noscript|ol|p(?:re)?|script|table|ul
 }msx;
 my $HTML5_ATTR = qr{
     (?: [ \t\n]+
-        [[:alpha:]][-_:[:alnum:]]* [ \t\n]*
+        [$ALPHA][-_:$ALNUM]* [ \t\n]*
         (?:[=] [ \t\n]* (?:"[^"]*"|'[^']*'|`[^`]*`|[^\P{Graph}<>"'`=]+))?
     )*
 }msx;
 my $HTML5_TAG = qr{
     <
-    (?: [[:alpha:]][-_:[:alnum:]]* $HTML5_ATTR [ \t\n]* /?>
-    |   / [[:alpha:]][-_:[:alnum:]]* [ \t\n]* >
+    (?: [$ALPHA][-_:$ALNUM]* $HTML5_ATTR [ \t\n]* /?>
+    |   / [$ALPHA][-_:$ALNUM]* [ \t\n]* >
     |   !-- .*? -->
     )
 }msx;
@@ -48,8 +54,8 @@ my %HTML5_SPECIAL = (
     q{"} => q{&quot;}, q{'} => q{&#39;}, q{`} => q{&#96;}, q{\\} => q{&#92;},
 );
 my $AMP = qr{
-    (?: [[:alpha:]][[:alnum:]]*
-    |   \#(?:[[:digit:]]{1,10}|x[[:xdigit:]]{2,8})
+    (?: [$ALPHA][$ALNUM]*
+    |   \#(?:[$DIGIT]{1,10}|x[$XDIGIT]{2,8})
     )
 }msx;
 my $EMPHASIS = qr{ #'.'
@@ -133,7 +139,7 @@ sub escape_uri {
     if (utf8::is_utf8($uri)) {
         $uri = Encode::encode('utf-8', $uri);
     }
-    $uri =~ s{(?:(%([[:xdigit:]]{2})?)|(&(?:amp;)?)|([^[:alnum:]\-_~&*+=/.!,;:?\#]))}{
+    $uri =~ s{(?:(%([$XDIGIT]{2})?)|(&(?:amp;)?)|([^$ALNUM\-_~&*+=/.!,;:?\#]))}{
         $2 ? $1 : $1 ? '%25' : $3 ? '&amp;' : sprintf '%%%02X', ord $4
     }egmosx;
     return $uri;
@@ -159,7 +165,7 @@ sub _block {
     while ($src =~ m{\G
         (?: ((?:[ \t]*\n)+)
         |   (?<=\n\n)
-            (   <  (?: ($BLOCKTAG) $HTML5_ATTR [ \t\n]*>.*?</\3[ \t\n]*>
+            (   <  (?: ($BLOCKTAG) $HTML5_ATTR [ \t\n]*(?:/>|>.*?</\3[ \t\n]*>)
                 |   hr $HTML5_ATTR [ \t\n]* /?>
                 |   !-- .*? -->
                 )
@@ -168,18 +174,19 @@ sub _block {
             \n
         |   ((?:$TAB [^\n]+\n)+ (?:\n+ (?:$TAB [^\n]+\n)+)*)
         |   $PAD
-            (?: (\#{1,6})\#* [ \t]* ([^\n]+?) [ \t]* (?:\#+ [ \t]*)? \n
+            (?: (\#{1,6})\#* [ \t]* ([^\n]+?) (?:[ \t]+(?:\#+[ \t]*)?)? \n
             |   ([^\n]+?) [ \t]* \n $PAD (=+|-+) [ \t]* \n
             |   () $HRULE
             |   (> [^\n]* \n $LINES (?:\n* $PAD> [^\n]* \n $LINES)*)
-            |   ([*+-]|[[:digit:]]+[.])[ \t]+ ([^\n]+ \n)
+            |   ([*+-]|[$DIGIT]+[.])[ \t]+ ([^\n]+ \n)
             |   ([^\n]+ \n)
             )
         )
     }gcmsx) {
         next if defined $1;
-        if (! $in_flow && $result ne q{} && "\n" ne substr $result, -1) {
+        if ($in_flow && $result ne q{} && "\n" ne substr $result, -1) {
             $result .= "\n";
+            $in_flow = q();
         }
         if (defined $13) {
             my $inline = $13;
@@ -217,7 +224,7 @@ sub _block {
         }
         elsif (defined $10) {
             my $data = $10;
-            $data =~ s/^[ ]{0,3}>[ \t]?//gmsx;
+            $data =~ s/^$PAD>[ \t]?//gmsx;
             my $t = $self->_block($data);
             $result .= qq{<blockquote>\n$t</blockquote>\n};
         }
@@ -235,12 +242,10 @@ sub _block {
                 $data =~ s/^$TAB//gmsx;
                 my $t = $self->_block($data, 'flow');
                 $result .= qq{<li>$t</li>\n};
-                last if $src !~ m{\G \n* $limark ([^\n]+ \n)}gcmsx;
-                $data = $1; ## no critic qw(CaptureWithoutTest)
+                $data = $src =~ m{\G \n* $limark ([^\n]+ \n)}gcmsx ? $1 : last;
             }
             $result .= qq{</$list>\n};
         }
-        $in_flow = 0;
     }
     return $result;
 }
@@ -250,14 +255,14 @@ sub _inline {
     my $c = $self->_iilex({'str' => q(), 'token' => []}, $src);
     my $s = $c->{'str'};
     $s =~ s{$EMPHASIS}{ $self->_emphasis($s, [@-], [@+]) }egmosx;
-    $s =~ s{<([[:digit:]]+)>}{$c->{token}[$1]}egmsx;
+    $s =~ s{<([$DIGIT]+)>}{$c->{token}[$1]}egmsx;
     return $s;
 }
 
 sub _emphasis {
     my($self, $s, $sp, $ep) = @_;
     my $t = $EMPHASIS_TEMPLATE[$#{$sp}];
-    $t =~ s{([[:digit:]]+)}{
+    $t =~ s{([$DIGIT]+)}{
         substr $s, $sp->[$1], $ep->[$1] - $sp->[$1]
     }egmosx;
     return $t;
@@ -288,7 +293,7 @@ sub _iilex {
         last if defined $2;
         if (defined $3) {
             push @{$c->{token}}, $self->escape_html($3);
-            $c->{str} .= "<" . $#{$c->{token}} . ">";
+            $c->{str} .= q(<) . $#{$c->{token}} . q(>);
             next;
         }
         if (defined $4) {
@@ -297,7 +302,7 @@ sub _iilex {
         }
         if (defined $5) {
             push @{$c->{token}}, '<code>' . $self->escape_htmlall($6) . '</code>';
-            $c->{str} .= "<" . $#{$c->{token}} . ">";
+            $c->{str} .= q(<) . $#{$c->{token}} . q(>);
             next;
         }
         if ($7 || ! $already{'link'}) {
@@ -330,7 +335,7 @@ sub _iitag {
         # do nothing
     }
     elsif ($tag =~ m{
-        <(?:mailto:)?([-.\w+]+\@[-\w]+(?:[.][-\w]+)*[.][[:lower:]]+)>
+        <(?:mailto:)?([-.\w+]+\@[-\w]+(?:[.][-\w]+)*[.][$LOWER]+)>
     }msx) {
         my $href = 'mailto:' . $1;
         my $text = $1;
@@ -348,7 +353,7 @@ sub _iitag {
         return;
     }
     push @{$c->{token}}, $tag;
-    $c->{str} .= "<" . $#{$c->{token}} . ">";
+    $c->{str} .= q(<) . $#{$c->{token}} . q(>);
     return;
 }
 
@@ -360,14 +365,14 @@ sub _iilink {
     if ($img) {
         my $alt = $self->escape_html($text);
         push @{$c->{token}}, qq(<img src="$link" alt="$alt"$title />);
-        $c->{str} .= "<" . $#{$c->{token}} . ">";
+        $c->{str} .= q(<) . $#{$c->{token}} . q(>);
     }
     else {
         push @{$c->{token}}, qq(<a href="$link"$title>);
-        $c->{str} .= "<" . $#{$c->{token}} . ">";
+        $c->{str} .= q(<) . $#{$c->{token}} . q(>);
         $self->_iilex($c, $text, %already, 'link' => 1);
         push @{$c->{token}}, q(</a>);
-        $c->{str} .= "<" . $#{$c->{token}} . ">";
+        $c->{str} .= q(<) . $#{$c->{token}} . q(>);
     }
     return;
 }
@@ -394,7 +399,7 @@ Text::Mkdown - Core Markdown to XHTML text converter.
 
 =head1 VERSION
 
-0.007
+0.008
 
 =head1 SYNOPSIS
 
