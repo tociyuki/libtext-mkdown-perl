@@ -1,4 +1,4 @@
-Text-Mkdown version 0.008
+Text-Mkdown version 0.009
 
 Converts basic Markdown text to XHTML one.
 This is alternative implementation from the orignal Text::Markdown.
@@ -18,7 +18,7 @@ None.
 
 COPYRIGHT AND LICENCE
 
-Copyright (C) 2011, MIZUTANI Tociyuki
+Copyright (C) 2013, MIZUTANI Tociyuki
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself.

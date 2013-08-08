@@ -6,7 +6,7 @@ use Carp;
 use Encode;
 use parent qw(Exporter);
 
-use version; our $VERSION = '0.008';
+use version; our $VERSION = '0.009';
 # $Id$
 
 our @EXPORT_OK = qw(markdown);
@@ -24,6 +24,7 @@ my $NEST_BRACKET = _nest_pattern(q{[^\\[\\]]*(?:\\[R\\][^\\[\\]]*)*}, 6);
 my $TAB = qr/(?:\t|[ ](?:\t|[ ](?:\t|[ ][ \t])))/msx;
 my $PAD = qr/[ ]{0,3}/msx;
 # Instead of specification: letters, numbers, spaces, and punctuation
+my $LINK_ANCHOR = qr{[^\P{Graph}\[\]]+(?:[ \t]+[^\P{Graph}\[\]]+)*}msx;
 my $LINK_LABEL = qr{[^\P{Graph}\[\]]+(?:\s+[^\P{Graph}\[\]]+)*}msx;
 # list items
 my $HRULE = qr{(?:(?:[*][ \t]*){3,}|(?:[-][ \t]*){3,}|(?:[_][ \t]*){3,})\n}msx;
@@ -36,28 +37,26 @@ my $BLOCKTAG = qr{
     blockquote|d(?:el|iv|l)|f(?:i(?:eldset|gure)|orm)|h[1-6]|i(?:frame|ns)
     |math|noscript|ol|p(?:re)?|script|table|ul
 }msx;
+my $HTML5_NAME = qr/[$ALPHA][-_:$ALNUM]*/msx;
 my $HTML5_ATTR = qr{
     (?: [ \t\n]+
-        [$ALPHA][-_:$ALNUM]* [ \t\n]*
-        (?:[=] [ \t\n]* (?:"[^"]*"|'[^']*'|`[^`]*`|[^\P{Graph}<>"'`=]+))?
+        $HTML5_NAME
+        (?: [ \t\n]* [=] [ \t\n]*
+            (?:"[^"]*"|'[^']*'|`[^`]*`|[^\P{Graph}<>"'`=]+)
+        )?
     )*
 }msx;
 my $HTML5_TAG = qr{
-    <
-    (?: [$ALPHA][-_:$ALNUM]* $HTML5_ATTR [ \t\n]* /?>
-    |   / [$ALPHA][-_:$ALNUM]* [ \t\n]* >
-    |   !-- .*? -->
-    )
+    <   (?: $HTML5_NAME $HTML5_ATTR [ \t\n]* /?>
+        |   / $HTML5_NAME [ \t\n]* >
+        |   !-- .*? -->
+        )
 }msx;
 my %HTML5_SPECIAL = (
     q{&} => q{&amp;}, q{<} => q{&lt;}, q{>} => q{&gt;},
     q{"} => q{&quot;}, q{'} => q{&#39;}, q{`} => q{&#96;}, q{\\} => q{&#92;},
 );
-my $AMP = qr{
-    (?: [$ALPHA][$ALNUM]*
-    |   \#(?:[$DIGIT]{1,10}|x[$XDIGIT]{2,8})
-    )
-}msx;
+my $AMP = qr/[$ALPHA][$ALNUM]*|\#(?:[$DIGIT]{1,10}|x[$XDIGIT]{2,8})/msx;
 my $EMPHASIS = qr{ #'.'
     (?<![*_])
     (?: ([*_])(?![\s.,!?;:*_]|$)(.+?)(?:(?<![\s*_])\1
@@ -101,7 +100,7 @@ sub markdown {
     $src .= "\n";
     while ($src =~ s{
         ^$PAD
-        \[($LINK_LABEL)\]: [ \t]+ (?:<(\S+?)>|(\S+))
+        \[($LINK_ANCHOR)\]: [ \t]+ (?:<(\S+?)>|(\S+))
         (?: (?:[ \t]+(?:\n[ \t]*)?|\n[ \t]*)
             (?:"([^\n]*)"|'([^\n]*)'|[(]($NEST_PAREN)[)])
         )? [ \t]* \n
@@ -120,22 +119,22 @@ sub _id {
     return $id;
 }
 
-sub escape_htmlall {
-    my($self, $data) = @_;
+sub _escape_htmlall {
+    my($data) = @_;
     $data =~ s{([&<>"'\`\\])}{ $HTML5_SPECIAL{$1} }egmosx;
     return $data;
 }
 
-sub escape_html {
-    my($self, $data) = @_;
+sub _escape_html {
+    my($data) = @_;
     $data =~ s{(?:([<>"'\`\\])|\&(?:($AMP);)?)}{
         $1 ? $HTML5_SPECIAL{$1} : $2 ? qq{\&$2;} : q{&amp;}
     }egmosx;
     return $data;
 }
 
-sub escape_uri {
-    my($self, $uri) = @_;
+sub _escape_uri {
+    my($uri) = @_;
     if (utf8::is_utf8($uri)) {
         $uri = Encode::encode('utf-8', $uri);
     }
@@ -146,7 +145,7 @@ sub escape_uri {
 }
 
 sub _encode_mailchar {
-    my($self, $char) = @_;
+    my($char) = @_;
     my $r = rand;
     if ($r > 0.9 && $char ne q{@}) {
         return $char;
@@ -175,11 +174,11 @@ sub _block {
         |   ((?:$TAB [^\n]+\n)+ (?:\n+ (?:$TAB [^\n]+\n)+)*)
         |   $PAD
             (?: (\#{1,6})\#* [ \t]* ([^\n]+?) (?:[ \t]+(?:\#+[ \t]*)?)? \n
-            |   ([^\n]+?) [ \t]* \n $PAD (=+|-+) [ \t]* \n
+            |   (\S[^\n]*?) [ \t]* \n $PAD (=+|-+) [ \t]* \n
             |   () $HRULE
-            |   (> [^\n]* \n $LINES (?:\n* $PAD> [^\n]* \n $LINES)*)
-            |   ([*+-]|[$DIGIT]+[.])[ \t]+ ([^\n]+ \n)
-            |   ([^\n]+ \n)
+            |   (> [^\n]*\n $LINES (?:\n* $PAD> [^\n]* \n $LINES)*)
+            |   ([*+-]|[$DIGIT]+[.])[ \t]+ (\S[^\n]* \n)
+            |   (\S[^\n]* \n)
             )
         )
     }gcmsx) {
@@ -206,7 +205,7 @@ sub _block {
         elsif (defined $4) {
             my $data = $4;
             $data =~ s/^$TAB//gmsx;
-            my $t = $self->escape_htmlall($data);
+            my $t = _escape_htmlall($data);
             $result .= qq{<pre><code>$t</code></pre>\n};
         }
         elsif (defined $5) {
@@ -254,13 +253,13 @@ sub _inline {
     my($self, $src) = @_;
     my $c = $self->_iilex({'str' => q(), 'token' => []}, $src);
     my $s = $c->{'str'};
-    $s =~ s{$EMPHASIS}{ $self->_emphasis($s, [@-], [@+]) }egmosx;
+    $s =~ s{$EMPHASIS}{ _emphasis($s, [@-], [@+]) }egmosx;
     $s =~ s{<([$DIGIT]+)>}{$c->{token}[$1]}egmsx;
     return $s;
 }
 
 sub _emphasis {
-    my($self, $s, $sp, $ep) = @_;
+    my($s, $sp, $ep) = @_;
     my $t = $EMPHASIS_TEMPLATE[$#{$sp}];
     $t =~ s{([$DIGIT]+)}{
         substr $s, $sp->[$1], $ep->[$1] - $sp->[$1]
@@ -286,13 +285,13 @@ sub _iilex {
         )
     }gcmosx) {
         if ($1 ne q{}) {
-            my $text = $self->escape_html($1);
+            my $text = _escape_html($1);
             $text =~ s{[ ]{2,}\n}{<br />\n}gmsx;
             $c->{str} .= $text;
         }
         last if defined $2;
         if (defined $3) {
-            push @{$c->{token}}, $self->escape_html($3);
+            push @{$c->{token}}, _escape_html($3);
             $c->{str} .= q(<) . $#{$c->{token}} . q(>);
             next;
         }
@@ -301,7 +300,7 @@ sub _iilex {
             next;
         }
         if (defined $5) {
-            push @{$c->{token}}, '<code>' . $self->escape_htmlall($6) . '</code>';
+            push @{$c->{token}}, '<code>' . _escape_htmlall($6) . '</code>';
             $c->{str} .= q(<) . $#{$c->{token}} . q(>);
             next;
         }
@@ -323,7 +322,7 @@ sub _iilex {
             my($img, $left, $right) = ($7, $8, $9);
             $c->{str} .= $img . q([);
             $self->_iilex($c, $left, %already);
-            $c->{str} .= q(]) . $self->escape_html($right);
+            $c->{str} .= q(]) . _escape_html($right);
         }
     }
     return $c;
@@ -344,12 +343,12 @@ sub _iitag {
         $tag = qq{<a href="$href">$text</a>};
     }
     elsif ($tag =~ m{\A<(\S+)>\z}msx) {
-        my $href = $self->escape_uri($1);
-        my $text = $self->escape_html($1);
+        my $href = _escape_uri($1);
+        my $text = _escape_html($1);
         $tag = qq(<a href="$href">$text</a>);
     }
     else {
-        $c->{str} .= $self->escape_html($tag);
+        $c->{str} .= _escape_html($tag);
         return;
     }
     push @{$c->{token}}, $tag;
@@ -359,11 +358,11 @@ sub _iitag {
 
 sub _iilink {
     my($self, $c, $img, $text, $link, $title, %already) = @_;
-    $link = $self->escape_uri($link);
+    $link = _escape_uri($link);
     $title = defined $title
-        ? q( title=") . $self->escape_html($title) . q(") : q();
+        ? q( title=") . _escape_html($title) . q(") : q();
     if ($img) {
-        my $alt = $self->escape_html($text);
+        my $alt = _escape_html($text);
         push @{$c->{token}}, qq(<img src="$link" alt="$alt"$title />);
         $c->{str} .= q(<) . $#{$c->{token}} . q(>);
     }
@@ -399,7 +398,7 @@ Text::Mkdown - Core Markdown to XHTML text converter.
 
 =head1 VERSION
 
-0.008
+0.009
 
 =head1 SYNOPSIS
 
@@ -423,12 +422,6 @@ Text::Mkdown - Core Markdown to XHTML text converter.
 
 =item C<new>
 
-=item C<escape_htmlall>
-
-=item C<escape_html>
-
-=item C<escape_uri>
-
 =back
 
 =head1 LIMITATIONS
@@ -438,12 +431,14 @@ Nesting level of square brackets or parences is up to 6.
 Not implement single square bracketed link.
 
     isnt link [foo].
+    is link [foo][].
 
       [foo]: /example.net/?foo "wiki"
 
 produces:
 
-    <p>isnt link [foo]</p>
+    <p>isnt link [foo].
+    is link <a href="/example.net/?foo" title="wiki">foo</a>.</p>
 
 Not implement markdown attributes.
 
@@ -464,7 +459,7 @@ L<Text::Markdown>
 
 =head1 AUTHOR
 
-MIZUTANI Tociyuki  C<< <tociyuki@gmail.com> >>
+MIZUTANI Tociyuki  C<< <tociyuki\x40gmail.com> >>
 
 =head1 LICENSE AND COPYRIGHT
 
