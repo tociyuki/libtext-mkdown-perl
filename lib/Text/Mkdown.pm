@@ -53,13 +53,18 @@ sub new {
     return $self;
 }
 
+sub middle_word_underscore {
+    my($self, @arg) = @_;
+    @arg and $self->{'middle_word_underscore'} = $arg[0];
+    return $self->{'middle_word_underscore'};
+}
+
 sub markdown {
     my($self, $src) = @_ == 1 ? (__PACKAGE__->new, $_[0]) : @_;
     my $ctx = {
         'reflink' => {},
         'footnote' => {}, 'footitem' => [],
     };
-    $src =~ s/(?:\r\n?|\n)/\n/gmsx;
     my @content = $self->_parse_toplevel($ctx, $src);
     my $footitem = delete $ctx->{'footitem'};
     if (@{$footitem}) {
@@ -141,6 +146,7 @@ my $LEXDL = qr{
 
 sub _parse_toplevel {
     my($self, $ctx, $src) = @_;
+    $src =~ s/(?:\r\n?|\n)/\n/gmsx;
     $src =~ s/^[ \t]+$//gmsx;
     chomp $src;
     $src = "\n\n$src\n\n";
@@ -181,7 +187,6 @@ sub _parse_toplevel {
 
 sub _parse_blockseq {
     my($self, $ctx, $src) = @_;
-    $src =~ s/^[ \t]+$//gmsx;
     chomp $src;
     $src = "$src\n\n";
     my @list;
@@ -193,7 +198,6 @@ sub _parse_blockseq {
 
 sub _parse_listitem {
     my($self, $ctx, $src) = @_;
-    $src =~ s/^[ \t]+$//gmsx;
     $src =~ s/^$TAB//gmsx;
     chomp $src;
     $src = "$src\n\n";
@@ -272,6 +276,7 @@ sub _parse_block {
                 $lazy = ! $1;
                 $t .= $2;
             }
+            $t =~ s/^[ \t]+$//gmsx;
             push @{$list}, ['blockquote', {}, $self->_parse_blockseq($ctx, $t)];
         }
         elsif (defined $2) {
@@ -386,23 +391,6 @@ my %EMPHASIS_TOKEN = (
     q(_**) => [[4, q(_)],  [2, q(**)]],
     q(__*) => [[5, q(__)], [1, q(*)]],
 );
-my @EMPHASIS_DFA = (
-    [ 0,  1,  2,  3,  4,  5,  6],
-    [ 1,  0,  7,  1,  1,  8,  1],   # S0 '*'.S1 '*' S0
-    [ 2,  9,  0,  2, 10,  2,  2],   # S0 '**'.S2 '**' S0
-    [ 3,  2,  1,  0,  3,  3,  3],   # S0 '***'.S3 '***' S0
-    [ 4,  4, 11,  4,  0, 12,  4],   # S0 '_'.S4 '_' S0
-    [ 5, 13,  5,  5, 14,  0,  5],   # S0 '__'.S5 '__' S0
-    [ 6,  6,  6,  6,  5,  4,  0],   # S0 '___'.S6 '___' S0
-    [ 7,  7,  1,  0,  7,  7,  7],   # S0 '*' S1 '**'.S7 '**' S1 '*' S0
-    [ 8,  8,  8,  8,  8,  1,  8],   # S0 '*' S1 '__'.S8 '__' S1 '*' S0
-    [ 9,  2,  9,  0,  9,  9,  9],   # S0 '**' S2 '*'.S9 '*' S2 '**' S0
-    [10, 10, 10, 10,  2, 10, 10],   # S0 '**' S2 '_'.S10 '_' S2 '**' S0
-    [11, 11,  4, 11, 11, 11, 11],   # S0 '_' S4 '**'.S11 '**' S4 '_' S0
-    [12, 12, 12, 12, 12,  4,  0],   # S0 '_' S4 '__'.S12 '__' S4 '_' S0
-    [13,  5, 13, 13, 13, 13, 13],   # S0 '__' S5 '*'.S13 '*' S5 '__' S0
-    [14, 14, 14, 14,  5, 14,  0],   # S0 '__' S5 '_'.S14 '_' S5 '__' S0
-);
 my $EMPHASIS_MIDDLE = 0;
 my $EMPHASIS_LEFT = 1;
 my $EMPHASIS_RIGHT = 2;
@@ -449,8 +437,9 @@ sub _parse_inline {
             my $img = $10;
             my $text = $11;
             my $suffix = $12 || q();
-            my($uri, $title);
+            my $uri = undef;
             my $rel = q();
+            my $title = undef;
             if (defined $13 || defined $14) {
                 $uri = defined $13 ? $13 : $14;
                 $title = defined $15 ? $15 : $16;
@@ -518,6 +507,24 @@ sub _parse_angled {
     }
     return $src;
 }
+
+my @EMPHASIS_DFA = (
+    [ 0,  1,  2,  3,  4,  5,  6],
+    [ 1,  0,  7,  1,  1,  8,  1],   # S0 '*'.S1 '*' S0
+    [ 2,  9,  0,  2, 10,  2,  2],   # S0 '**'.S2 '**' S0
+    [ 3,  2,  1,  0,  3,  3,  3],   # S0 '***'.S3 '***' S0
+    [ 4,  4, 11,  4,  0, 12,  4],   # S0 '_'.S4 '_' S0
+    [ 5, 13,  5,  5, 14,  0,  5],   # S0 '__'.S5 '__' S0
+    [ 6,  6,  6,  6,  5,  4,  0],   # S0 '___'.S6 '___' S0
+    [ 7,  7,  1,  0,  7,  7,  7],   # S0 '*' S1 '**'.S7 '**' S1 '*' S0
+    [ 8,  8,  8,  8,  8,  1,  8],   # S0 '*' S1 '__'.S8 '__' S1 '*' S0
+    [ 9,  2,  9,  0,  9,  9,  9],   # S0 '**' S2 '*'.S9 '*' S2 '**' S0
+    [10, 10, 10, 10,  2, 10, 10],   # S0 '**' S2 '_'.S10 '_' S2 '**' S0
+    [11, 11,  4, 11, 11, 11, 11],   # S0 '_' S4 '**'.S11 '**' S4 '_' S0
+    [12, 12, 12, 12, 12,  4,  0],   # S0 '_' S4 '__'.S12 '__' S4 '_' S0
+    [13,  5, 13, 13, 13, 13, 13],   # S0 '__' S5 '*'.S13 '*' S5 '__' S0
+    [14, 14, 14, 14,  5, 14,  0],   # S0 '__' S5 '_'.S14 '_' S5 '__' S0
+);
 
 sub _turn_emphasis_dfa {
     my($self, $list, $emphasis, $side, $token, $mark) = @_;
@@ -633,7 +640,19 @@ Text::Mkdown - Core Markdown to XHTML text converter.
 
 =item C<markdown($markdown)>
 
+Converts from a Markdown text string to a XHTML's one.
+
 =item C<new>
+
+Constructs a Markdown processor with initial values for attributes.
+
+    my $m = Text::Markdown->new({'middle_word_underscore' => 1});
+
+=item C<middle_word_underscore>
+
+Boolean attribute accessors. In defaults, it is false.
+When its value is true, all of underscores in the middle of words
+keep themselves rather than emphasis markers.
 
 =back
 
@@ -649,9 +668,9 @@ produces:
 
     <div markdown="1">**strong**</div>
 
-Not implements PHP extra abbr.
+Not implement PHP extra abbr.
 
-Not implements PHP extra tables.
+Not implement PHP extra tables.
 
 =head1 DEPENDENCIES
 
