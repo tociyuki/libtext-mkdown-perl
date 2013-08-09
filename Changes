@@ -1,5 +1,14 @@
 Revision history for Text-Mkdown
 
+0.01    Fri Aug  9 06:41:46 2013
+    ! lazy inline parsing.
+    + emphasis DFA.
+    ! natural works for [nested [this][] links].
+    + single braced reference links. [this]
+    + PHP Markdown's footnotes. [^this]
+    + PHP Markdown's define lists.
+    + Github Flavor fenced source code block. ```\n.*?\n```\n
+
 0.009   Fri Aug  9 08:18:24 2013
     ! change from methods escape_(html|uri)(all)? to private functions.
 

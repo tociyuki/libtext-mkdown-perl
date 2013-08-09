@@ -1,4 +1,5 @@
 Changes
+exam.pl
 ignore.txt
 lib/Text/Mkdown.pm
 Makefile.PL
@@ -16,6 +17,9 @@ t/33.spaceinlinksandimages.t
 t/34.commandlinemarkdown.t
 t/37.anchormultilinebugs.t
 t/40.trustliststart.t
+t/50.definition-lists.t
+t/51.footnote.t
+t/52.middle-word-underscore.t
 t/code-hr.t
 t/docs-maruku-unittest/abbreviations.html
 t/docs-maruku-unittest/abbreviations.text
@@ -330,8 +334,8 @@ t/PHP_Markdown-from-MDTest1.1.mdtest/Code_block_in_a_list_item.text
 t/PHP_Markdown-from-MDTest1.1.mdtest/Code_block_in_a_list_item.xhtml
 t/PHP_Markdown-from-MDTest1.1.mdtest/Code_Spans.text
 t/PHP_Markdown-from-MDTest1.1.mdtest/Code_Spans.xhtml
-t/PHP_Markdown-from-MDTest1.1.mdtest/Email_auto_links-todo.text
-t/PHP_Markdown-from-MDTest1.1.mdtest/Email_auto_links-todo.xhtml
+t/PHP_Markdown-from-MDTest1.1.mdtest/Email_auto_links.text
+t/PHP_Markdown-from-MDTest1.1.mdtest/Email_auto_links.xhtml
 t/PHP_Markdown-from-MDTest1.1.mdtest/Emphasis.text
 t/PHP_Markdown-from-MDTest1.1.mdtest/Emphasis.xhtml
 t/PHP_Markdown-from-MDTest1.1.mdtest/Headers.text

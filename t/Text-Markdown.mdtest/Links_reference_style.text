@@ -48,9 +48,9 @@ Nor [that][].
 
 Nor [that].
 
-\[Something in brackets like [this][] should work\]
+[Something in brackets like [this][] should work]
 
-\[Same with [this].\]
+[Same with [this].]
 
 In this case, [this](/somethingelse/) points to something else.
 

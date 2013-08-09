@@ -6,7 +6,7 @@ use Carp;
 use Encode;
 use parent qw(Exporter);
 
-use version; our $VERSION = '0.009';
+use version; our $VERSION = '0.01';
 # $Id$
 
 our @EXPORT_OK = qw(markdown);
@@ -20,18 +20,6 @@ my $XDIGIT = '0-9A-Fa-f';
 # upto 6 level nested parens or brackets
 my $NEST_PAREN = _nest_pattern(q{[^()\\n]*?(?:[(]R[)][^()\\n]*?)*}, 6);
 my $NEST_BRACKET = _nest_pattern(q{[^\\[\\]]*(?:\\[R\\][^\\[\\]]*)*}, 6);
-# Markdown syntax defines indent as [ ]{4} or tab.
-my $TAB = qr/(?:\t|[ ](?:\t|[ ](?:\t|[ ][ \t])))/msx;
-my $PAD = qr/[ ]{0,3}/msx;
-# Instead of specification: letters, numbers, spaces, and punctuation
-my $LINK_ANCHOR = qr{[^\P{Graph}\[\]]+(?:[ \t]+[^\P{Graph}\[\]]+)*}msx;
-my $LINK_LABEL = qr{[^\P{Graph}\[\]]+(?:\s+[^\P{Graph}\[\]]+)*}msx;
-# list items
-my $HRULE = qr{(?:(?:[*][ \t]*){3,}|(?:[-][ \t]*){3,}|(?:[_][ \t]*){3,})\n}msx;
-my $ULMARK = qr{$PAD (?! $HRULE) [*+-][ \t]+}msx;
-my $OLMARK = qr{$PAD [$DIGIT]+[.][ \t]+}msx;
-my $ITEM = qr{(?:(?! $PAD (?:[*+-]|[$DIGIT]+[.])[ \t]+) [^\n]+\n)*}msx;
-my $LINES = qr{(?:[^\n]+\n)*}msx;
 # html specific patterns
 my $BLOCKTAG = qr{
     blockquote|d(?:el|iv|l)|f(?:i(?:eldset|gure)|orm)|h[1-6]|i(?:frame|ns)
@@ -57,321 +45,546 @@ my %HTML5_SPECIAL = (
     q{"} => q{&quot;}, q{'} => q{&#39;}, q{`} => q{&#96;}, q{\\} => q{&#92;},
 );
 my $AMP = qr/[$ALPHA][$ALNUM]*|\#(?:[$DIGIT]{1,10}|x[$XDIGIT]{2,8})/msx;
-my $EMPHASIS = qr{ #'.'
-    (?<![*_])
-    (?: ([*_])(?![\s.,!?;:*_]|$)(.+?)(?:(?<![\s*_])\1
-        #'*' #'<em>2</em>'
-        |   (?<![*_])([*][*]|[_][_])(?![\s.,!?;:*_]|$)(.+?)(?<![\s*_])\3
-            #'**' #'<em>2<strong>4</strong></em>'
-            (?:(?![*_])(.+?)(?<![\s*_]))?\1
-            #'<em>2<strong>4</strong>5</em>'
-        )
-    |   ([*][*]|[_][_])(?![\s.,!?;:*_]|$)(.+?)(?:(?<![\s*_])\6
-        #'**' #'<strong>7</strong>'
-        |   (?<![*_])([*_])(?![\s.,!?;:*_]|$)(.+?)(?<![\s*_])\8
-            #'*' #'<strong>7<em>9</em></strong>'
-            (?:(?![*_])(.+?)(?<![\s*_]))?\6
-            #'<strong>7<em>9</em>10</strong>'
-        )
-    |   ([*][*]|[_][_])([*_])(?![\s.,!?;:*_]|$)(.+?)(?<![\s*_])\12
-        #'**' #'*' #'<strong><em>13</em></strong>'
-        (?:(?![*_])(.+?)(?<![\s*_]))?\11
-        #'<strong><em>13</em>14</strong>'
-    |   ([*_])([*][*]|[_][_])(?![\s.,!?;:*_]|$)(.+?)(?<![\s*_])\16
-        #'*' #'**' #'<em><strong>17</strong></em>'
-        (?:(?![*_])(.+?)(?<![\s*_]))?\15
-        #'<em><strong>17</strong>18</em>' 
-    )
-    (?![*_])
-}msx;
-my @EMPHASIS_TEMPLATE = $EMPHASIS =~ m{\#'(.*?)'}gmosx;
 
 sub new {
-    my($class) = @_;
-    my $self = bless {}, ref $class || $class;
+    my($class, $init) = @_;
+    $init = +{ref $init eq 'HASH' ? %{$init} : ()};
+    my $self = bless $init, ref $class || $class;
     return $self;
 }
 
 sub markdown {
     my($self, $src) = @_ == 1 ? (__PACKAGE__->new, $_[0]) : @_;
-    $self->{'links'} = {};
+    my $ctx = {
+        'reflink' => {},
+        'footnote' => {}, 'footitem' => [],
+    };
     $src =~ s/(?:\r\n?|\n)/\n/gmsx;
-    chomp $src;
-    $src .= "\n";
-    while ($src =~ s{
-        ^$PAD
-        \[($LINK_ANCHOR)\]: [ \t]+ (?:<(\S+?)>|(\S+))
+    my @content = $self->_parse_toplevel($ctx, $src);
+    my $footitem = delete $ctx->{'footitem'};
+    if (@{$footitem}) {
+        push @content, ['hr', {}];
+        push @content, ['ol', {'class'=>'footnote'}, @{$footitem}];
+    }
+    return $self->_fold_parse_inline($ctx, @content);
+}
+
+# Markdown syntax defines indent as [ ]{4} or tab.
+my $TAB = qr/(?:\t|[ ](?:\t|[ ](?:\t|[ ][ \t])))/msx;
+my $PAD = qr/[ ]{0,3}/msx;
+# Instead of specification: letters, numbers, spaces, and punctuation
+my $LINK_ANCHOR = qr{[^\P{Graph}\[\]]+(?:[ \t]+[^\P{Graph}\[\]]+)*}msx;
+my $LINK_LABEL = qr{[^\P{Graph}\[\]]+(?:\s+[^\P{Graph}\[\]]+)*}msx;
+# Block patterns
+my $HRULE = qr{(?:[*][ \t]*){3,}|(?:[-][ \t]*){3,}|(?:[_][ \t]*){3,}}msx;
+my $LAZY = qr{(?!(?:[>\#]|[*+\-:][ \t]|[$DIGIT]+[.][ \t]|$HRULE\n))\S[^\n]*}msx;
+my $LAZYINDENTS = qr{
+    \S[^\n]*\n (?:$PAD $LAZY\n)*
+    (?:(?:[ \t]*\n)*(?:$TAB [^\n]*\n(?:$PAD $LAZY\n)*)+)*
+}msx;
+my $INDENTS = qr/(?:$TAB [ \t]*\S[^\n]*\n)*(?:(?:[ \t]*\n)+(?:$TAB [ \t]*\S[^\n]*\n)+)*/msx;
+my $BLOCKQUOTE = qr/$PAD >[^\n]*\n(?:$PAD $LAZY\n)*/msx;
+
+my $LEXTOPLEVEL = qr{
+    (?: (?<=\n\n)
+        (<  (?: ($BLOCKTAG) $HTML5_ATTR [ \t\n]*(?:/>|>.*?</\2[ \t\n]*>)
+            |   hr $HTML5_ATTR [ \t\n]* /?>
+            |   !-- .*? -->
+            )
+            [ \t]*\n
+        ) #1 #2
+        \n
+    |   ```([\-_$ALNUM]*)\n(.*?)\n```\n #3 #4
+    |   $PAD \[(\^$LINK_ANCHOR)\][:]((?:[ \t]+(?:\S[^\n]*)?)?\n$INDENTS) #5 #6
+    |   $PAD \[($LINK_ANCHOR)\][:] [ \t]+ (?:<(\S+?)>|(\S+)) #7 #8 #9
         (?: (?:[ \t]+(?:\n[ \t]*)?|\n[ \t]*)
-            (?:"([^\n]*)"|'([^\n]*)'|[(]($NEST_PAREN)[)])
+            (?:"([^\n]*)"|'([^\n]*)'|[(]($NEST_PAREN)[)])   #10 #11 #12
         )? [ \t]* \n
-    }{}mosx) {
-        my($id, $link) = ($1, defined $2 ? $2 : $3);
-        my $title = defined $4 ? $4 : defined $5 ? $5 : $6;
-        $self->{'links'}{_id(lc $id)} = [$link, $title];
-    }
-    return $self->_block($src);
-}
+    )
+}msx;
 
-# strange case http://bugs.debian.org/459885
-sub _id {
-    my($id) = @_;
-    $id =~ s/\s+/ /gmsx;
-    return $id;
-}
+my $LEXBLOCK = qr{
+    (?: () (?:[ \t]*\n)+  #1
+    |   ($TAB [^\n]*\n$INDENTS)       #2
+    |   ($BLOCKQUOTE+(?:(?:[ \t]*\n)+$BLOCKQUOTE+)*) #3
+    |   () $PAD $HRULE\n         #4
+    |   $PAD [*+\-][ \t]+ ($LAZYINDENTS)        #5
+    |   $PAD [$DIGIT]+[.][ \t]+ ($LAZYINDENTS)  #6
+    |   $PAD (\#{1,6})\#*[ \t]*(\S[^\n]*?)\s*(?:\#+\s*)?\n     #7 #8
+    |   $PAD (\S[^\n]*)\n$PAD (=|-)\10*\n       #9 #10
+    |   ((?:$PAD [^\s:][^\n]*\n)+)
+        (?:(?:[ \t]*\n)*$PAD :[ \t]+($LAZYINDENTS))? #11 #12
+    )
+}msx;
 
-sub _escape_htmlall {
-    my($data) = @_;
-    $data =~ s{([&<>"'\`\\])}{ $HTML5_SPECIAL{$1} }egmosx;
-    return $data;
-}
+my $LEXLISTITEM = qr{
+    (?: () (?:[ \t]*\n)+  #1
+    |   ($TAB [^\n]*\n$INDENTS)       #2
+    |   ($BLOCKQUOTE+(?:(?:[ \t]*\n)+$BLOCKQUOTE+)*) #3
+    |   () $PAD $HRULE\n         #4
+    |   $PAD [*+\-][ \t]+ ($LAZYINDENTS)        #5
+    |   $PAD [$DIGIT]+[.][ \t]+ ($LAZYINDENTS)  #6
+    |   $PAD (\#{1,6})\#*[ \t]*(\S[^\n]*?)\s*(?:\#+\s*)?\n     #7 #8
+    |   $PAD (\S[^\n]*)\n$PAD (=|-)\10*\n       #9 #10
+    |   ((?:$PAD $LAZY\n)+)
+        (?:(?:[ \t]*\n)*$PAD :[ \t]+($LAZYINDENTS))? #11 #12
+    )
+}msx;
 
-sub _escape_html {
-    my($data) = @_;
-    $data =~ s{(?:([<>"'\`\\])|\&(?:($AMP);)?)}{
-        $1 ? $HTML5_SPECIAL{$1} : $2 ? qq{\&$2;} : q{&amp;}
-    }egmosx;
-    return $data;
-}
+my $LEXUL = qr{(?:[ \t]*\n)*$PAD (?!(?:$HRULE\n))[*+\-][ \t]+($LAZYINDENTS)}msx;
+my $LEXOL = qr{(?:[ \t]*\n)*$PAD [$DIGIT]+[.][ \t]+($LAZYINDENTS)}msx;
+my $LEXDL = qr{
+    (?:[ \t]*\n)*
+    (?: ((?:$PAD $LAZY\n)+)(?:[ \t]*\n)* )?
+    $PAD :[ \t]+($LAZYINDENTS)
+}msx;
 
-sub _escape_uri {
-    my($uri) = @_;
-    if (utf8::is_utf8($uri)) {
-        $uri = Encode::encode('utf-8', $uri);
-    }
-    $uri =~ s{(?:(%([$XDIGIT]{2})?)|(&(?:amp;)?)|([^$ALNUM\-_~&*+=/.!,;:?\#]))}{
-        $2 ? $1 : $1 ? '%25' : $3 ? '&amp;' : sprintf '%%%02X', ord $4
-    }egmosx;
-    return $uri;
-}
-
-sub _encode_mailchar {
-    my($char) = @_;
-    my $r = rand;
-    if ($r > 0.9 && $char ne q{@}) {
-        return $char;
-    }
-    else {
-        my $fmt = $r > 0.45 ? '&#x%X;' : '&#%d;';
-        return sprintf $fmt, ord $char;
-    }
-}
-
-sub _block {
-    my($self, $src, $in_flow) = @_;
+sub _parse_toplevel {
+    my($self, $ctx, $src) = @_;
     $src =~ s/^[ \t]+$//gmsx;
-    $src = "\n\n" . $src . "\n\n";
-    my $result = q{};
-    while ($src =~ m{\G
-        (?: ((?:[ \t]*\n)+)
-        |   (?<=\n\n)
-            (   <  (?: ($BLOCKTAG) $HTML5_ATTR [ \t\n]*(?:/>|>.*?</\3[ \t\n]*>)
-                |   hr $HTML5_ATTR [ \t\n]* /?>
-                |   !-- .*? -->
-                )
-                [ \t]*\n
-            )
-            \n
-        |   ((?:$TAB [^\n]+\n)+ (?:\n+ (?:$TAB [^\n]+\n)+)*)
-        |   $PAD
-            (?: (\#{1,6})\#* [ \t]* ([^\n]+?) (?:[ \t]+(?:\#+[ \t]*)?)? \n
-            |   (\S[^\n]*?) [ \t]* \n $PAD (=+|-+) [ \t]* \n
-            |   () $HRULE
-            |   (> [^\n]*\n $LINES (?:\n* $PAD> [^\n]* \n $LINES)*)
-            |   ([*+-]|[$DIGIT]+[.])[ \t]+ (\S[^\n]* \n)
-            |   (\S[^\n]* \n)
-            )
-        )
-    }gcmsx) {
-        next if defined $1;
-        if ($in_flow && $result ne q{} && "\n" ne substr $result, -1) {
-            $result .= "\n";
-            $in_flow = q();
-        }
-        if (defined $13) {
-            my $inline = $13;
-            if ($in_flow) {
-                $inline .= $src =~ m{\G($ITEM)}gcmsx ? $1 : q();
+    chomp $src;
+    $src = "\n\n$src\n\n";
+    my @list;
+    while (1) {
+        if ($src =~ m/\G$LEXTOPLEVEL/gcmsxo) {
+            if (defined $1) {
+                push @list, ['PARSED', $1];
             }
-            else {
-                $inline .= $src =~ m{\G($LINES)}gcmsx ? $1 : q();
+            elsif (defined $3) {
+                my($filetype, $s) = ($3, $4);
+                push @list, ['pre', {}, ['CODE', $filetype, $s]];
             }
-            chomp $inline;
-            my $t = $self->_inline($inline);
-            $result .= $in_flow ? $t : qq{<p>$t</p>\n};
+            elsif (defined $5) {
+                my $linklabel = _linklabel($5);
+                my $s = $6;
+                next if exists $ctx->{'footnote'}{$linklabel};
+                my $n = 1 + @{$ctx->{'footitem'}};
+                my $id = _htmlall_escape('fn:' . (substr $linklabel, 1));
+                $ctx->{'footnote'}{$linklabel} = {'href' => q(#).$id, 'n' => $n};
+                $s =~ s/\A\s+//msx;
+                push @{$ctx->{'footitem'}},
+                    ['li', {'id' => $id}, $self->_parse_listitem($ctx, $s)];
+            }
+            elsif (defined $7) {
+                my $linklabel = _linklabel($7);
+                my $uri = defined $8 ? $8 : $9;
+                my $title = defined $10 ? $10 : defined $11 ? $11 : $12;
+                $ctx->{'reflink'}{$linklabel} = [$uri, $title];
+            }
         }
-        elsif (defined $2) {
-            $result .= $2;
+        elsif (! _parse_block($self, $ctx, \$src, $LEXBLOCK, \@list)) {
+            last;
         }
-        elsif (defined $4) {
-            my $data = $4;
-            $data =~ s/^$TAB//gmsx;
-            my $t = _escape_htmlall($data);
-            $result .= qq{<pre><code>$t</code></pre>\n};
+    }
+    return @list;
+}
+
+sub _parse_blockseq {
+    my($self, $ctx, $src) = @_;
+    $src =~ s/^[ \t]+$//gmsx;
+    chomp $src;
+    $src = "$src\n\n";
+    my @list;
+    while (_parse_block($self, $ctx, \$src, $LEXBLOCK, \@list)) {
+        # do nothing.
+    }
+    return @list;
+}
+
+sub _parse_listitem {
+    my($self, $ctx, $src) = @_;
+    $src =~ s/^[ \t]+$//gmsx;
+    $src =~ s/^$TAB//gmsx;
+    chomp $src;
+    $src = "$src\n\n";
+    my @list;
+    while (_parse_block($self, $ctx, \$src, $LEXLISTITEM, \@list)) {
+        # do nothing.
+    }
+    my($first, @last) = @list;
+    if ($first->[0] eq 'p') {
+        splice @{$first}, 0, 2;
+        if (@last) {
+            push @{$first}, ['PARSED', "\n"];
         }
-        elsif (defined $5) {
-            my $n = length $5;
-            my $t = $self->_inline($6);
-            $result .= qq{<h$n>$t</h$n>\n};
+    }
+    unshift @last, @{$first};
+    return @last;
+}
+
+sub _parse_block {
+    my($self, $ctx, $refsrc, $pattern, $list) = @_;
+    if (${$refsrc} =~ m/\G$pattern/gcmsx) {
+        return 1 if defined $1;
+        if (defined $11 && ! defined $12) {
+            my $s = $11;
+            chomp $s;
+            push @{$list}, ['p', {}, ['INLINE', $s]];
         }
-        elsif (defined $8) {
-            my $n = (substr $8, 0, 1) eq q{=} ? 1 : 2;
-            my $t = $self->_inline($7);
-            $result .= qq{<h$n>$t</h$n>\n};
+        elsif (defined $12) {
+            my($dt, $dd) = ($11, $12);
+            push @{$list}, ['dl', {}];
+            while ($dt =~ m/^$PAD (\S[^\n]*)\n/gmsx) {
+                push @{$list->[-1]}, ['dt', {}, ['INLINE', $1]];
+            }
+            push @{$list->[-1]}, ['dd', {}, $self->_parse_listitem($ctx, $dd)];
+            while (${$refsrc} =~ m/\G$LEXDL/gcmsxo) {
+                my($dt, $dd) = ($1, $2);
+                if (defined $dt) {
+                    while ($dt =~ m/^$PAD (\S[^\n]*)\n/gmsx) {
+                        push @{$list->[-1]}, ['dt', {}, ['INLINE', $1]];
+                    }
+                }
+                push @{$list->[-1]}, ['dd', {}, $self->_parse_listitem($ctx, $dd)];
+            }
         }
         elsif (defined $9) {
-            $result .= qq{<hr />\n};
+            my $n = $10 eq q(=) ? 1 : 2;
+            push @{$list}, ["h$n", {}, ['INLINE', $9]];
         }
-        elsif (defined $10) {
-            my $data = $10;
-            $data =~ s/^$PAD>[ \t]?//gmsx;
-            my $t = $self->_block($data);
-            $result .= qq{<blockquote>\n$t</blockquote>\n};
+        elsif (defined $7) {
+            my $n = length $7;
+            push @{$list}, ["h$n", {}, ['INLINE', $8]];
         }
-        elsif (defined $11) {
-            my $data = $12;
-            my $list = length $11 == 1 ? 'ul' : 'ol';
-            $result .= qq{<$list>\n};
-            my $limark = $list eq 'ul' ? $ULMARK : $OLMARK;
-            while (1) {
-                if ($src =~ m{\G
-                    ($ITEM (?:\n+ $TAB [^\n]+ \n $ITEM)*)
-                }gcmsx) {
-                    $data .= $1;
+        elsif (defined $6) {
+            push @{$list}, ['ol', {}, ['li', {}, $self->_parse_listitem($ctx, $6)]];
+            while (${$refsrc} =~ m/\G$LEXOL/gcmsxo) {
+                push @{$list->[-1]}, ['li', {}, $self->_parse_listitem($ctx, $1)];
+            }
+        }
+        elsif (defined $5) {
+            push @{$list}, ['ul', {}, ['li', {}, $self->_parse_listitem($ctx, $5)]];
+            while (${$refsrc} =~ m/\G$LEXUL/gcmsxo) {
+                push @{$list->[-1]}, ['li', {}, $self->_parse_listitem($ctx, $1)];
+            }
+        }
+        elsif (defined $4) {
+            push @{$list}, ['hr', {}];
+        }
+        elsif (defined $3) {
+            my $s = $3;
+            my $t = q();
+            my $lazy = 0;
+            while ($s =~ m/\G$PAD (>[ \t]?)?([^\n]*\n)/gcmsxo) {
+                if ($1 && $lazy) {
+                    $t .= "\n";
                 }
-                $data =~ s/^$TAB//gmsx;
-                my $t = $self->_block($data, 'flow');
-                $result .= qq{<li>$t</li>\n};
-                $data = $src =~ m{\G \n* $limark ([^\n]+ \n)}gcmsx ? $1 : last;
+                $lazy = ! $1;
+                $t .= $2;
             }
-            $result .= qq{</$list>\n};
+            push @{$list}, ['blockquote', {}, $self->_parse_blockseq($ctx, $t)];
         }
+        elsif (defined $2) {
+            my $s = $2;
+            $s =~ s/^$TAB//gmsxo;
+            $s =~ s/^[ \t]+$//gmsxo;
+            push @{$list}, ['pre', {}, ['code', {}, ['PARSED', _htmlall_escape($s)]]];
+        }
+        return 1;
     }
-    return $result;
-}
-
-sub _inline {
-    my($self, $src) = @_;
-    my $c = $self->_iilex({'str' => q(), 'token' => []}, $src);
-    my $s = $c->{'str'};
-    $s =~ s{$EMPHASIS}{ _emphasis($s, [@-], [@+]) }egmosx;
-    $s =~ s{<([$DIGIT]+)>}{$c->{token}[$1]}egmsx;
-    return $s;
-}
-
-sub _emphasis {
-    my($s, $sp, $ep) = @_;
-    my $t = $EMPHASIS_TEMPLATE[$#{$sp}];
-    $t =~ s{([$DIGIT]+)}{
-        substr $s, $sp->[$1], $ep->[$1] - $sp->[$1]
-    }egmosx;
-    return $t;
-}
-
-sub _iilex {
-    my($self, $c, $src, %already) = @_;
-    my $ref = $self->{'links'};
-    ## no critic qw(EscapedMetacharacters)
-    while ($src =~ m{\G
-        (.*?)       #1:text
-        (?: () \z   #2:eos
-        |   \\([\\`*_<>{}\[\]()\#+\-.!])    #3:esc
-        |   (<!--.*?-->|</?\w[^>]+>)        #4:tag    
-        |   (`+)[ \t]*(.*?)[ \t]*\5         #5:code #6:code
-        |   ([!]?)\[($NEST_BRACKET)\]       #7:link #8:link
-            (   [(] [ \t]* (?:<([^>]*?)>|($NEST_PAREN)) #9:link #10:link #11:link
-                (?:[ \t]+ (?:"(.*?)"|'(.*?)'))? [ \t]* [)]  #12:link #13:link
-            |   (?:[ \t]|\n[ \t]*)? \[((?:$LINK_LABEL)?)\]     #14:link
-            )
-        )
-    }gcmosx) {
-        if ($1 ne q{}) {
-            my $text = _escape_html($1);
-            $text =~ s{[ ]{2,}\n}{<br />\n}gmsx;
-            $c->{str} .= $text;
-        }
-        last if defined $2;
-        if (defined $3) {
-            push @{$c->{token}}, _escape_html($3);
-            $c->{str} .= q(<) . $#{$c->{token}} . q(>);
-            next;
-        }
-        if (defined $4) {
-            $self->_iitag($c, $4);
-            next;
-        }
-        if (defined $5) {
-            push @{$c->{token}}, '<code>' . _escape_htmlall($6) . '</code>';
-            $c->{str} .= q(<) . $#{$c->{token}} . q(>);
-            next;
-        }
-        if ($7 || ! $already{'link'}) {
-            my $r = ! defined $14 ? undef
-                : $14 ne q() ? $ref->{_id(lc $14)} : $ref->{_id(lc $8)};
-            if ($r) {
-                $self->_iilink($c, $7, $8, $r->[0], $r->[1], %already);
-                next;
-            }
-            my $link = defined $10 ? $10 : $11;
-            if (defined $link) {
-                my $title = defined $12 ? $12 : $13;
-                $self->_iilink($c, $7, $8, $link, $title, %already);
-                next;
-            }
-        }
-        if (defined $8) {
-            my($img, $left, $right) = ($7, $8, $9);
-            $c->{str} .= $img . q([);
-            $self->_iilex($c, $left, %already);
-            $c->{str} .= q(]) . _escape_html($right);
-        }
-    }
-    return $c;
-}
-
-sub _iitag {
-    my($self, $c, $tag) = @_;
-    if ($tag =~ m{\A$HTML5_TAG\z}msx) {
-        # do nothing
-    }
-    elsif ($tag =~ m{
-        <(?:mailto:)?([-.\w+]+\@[-\w]+(?:[.][-\w]+)*[.][$LOWER]+)>
-    }msx) {
-        my $href = 'mailto:' . $1;
-        my $text = $1;
-        $href =~ s{(.)}{ _encode_mailchar($1) }egmosx;
-        $text =~ s{(.)}{ _encode_mailchar($1) }egmosx;
-        $tag = qq{<a href="$href">$text</a>};
-    }
-    elsif ($tag =~ m{\A<(\S+)>\z}msx) {
-        my $href = _escape_uri($1);
-        my $text = _escape_html($1);
-        $tag = qq(<a href="$href">$text</a>);
-    }
-    else {
-        $c->{str} .= _escape_html($tag);
-        return;
-    }
-    push @{$c->{token}}, $tag;
-    $c->{str} .= q(<) . $#{$c->{token}} . q(>);
     return;
 }
 
-sub _iilink {
-    my($self, $c, $img, $text, $link, $title, %already) = @_;
-    $link = _escape_uri($link);
-    $title = defined $title
-        ? q( title=") . _escape_html($title) . q(") : q();
-    if ($img) {
-        my $alt = _escape_html($text);
-        push @{$c->{token}}, qq(<img src="$link" alt="$alt"$title />);
-        $c->{str} .= q(<) . $#{$c->{token}} . q(>);
+# strange case http://bugs.debian.org/459885
+sub _linklabel {
+    my($id) = @_;
+    $id =~ s/\s+/ /gmsx;
+    return lc $id;
+}
+
+sub _htmlall_escape {
+    my($s) = @_;
+    $s =~ s{([&<>"'\`\\])}{ $HTML5_SPECIAL{$1} }egmsxo;
+    return $s;
+}
+
+sub _html_escape {
+    my($s) = @_;
+    $s =~ s{([<>"'\`\\]|\&(?:$AMP;)?)}{ $HTML5_SPECIAL{$1} || $1 }egmsxo;
+    return $s;
+}
+
+sub _uri_escape {
+    my($s) = @_;
+    $s = utf8::is_utf8($s) ? encode_utf8($s) : $s;
+    $s =~ s{(%[$XDIGIT]{2})|(&(?:amp;)?)|([^$ALNUM\-_~&*+=/.,;:!?\#])}{
+        $1 ? $1 : $2 ? '&amp;' : sprintf '%%%02X', ord $3
+    }egmsxo;
+    return $s;
+}
+
+sub _mail_escape {
+    my($s) = @_;
+    $s =~ s{([^bdehjkpruwy])}{sprintf '&#%d;', ord $1}egmsxo;
+    return $s;
+}
+
+my %STAGNL = map { $_ => "\n" } qw(ul ol dl hr blockquote);
+my %ETAGNL = map { $_ => "\n" }
+    qw(p h1 h2 h3 h4 h5 h6 ul ol dl dt dd li blockquote pre);
+my %EMPTYELEMENT = ('hr' => 1, 'img' => 1);
+my %HREFATTR = map { $_ => 1} qw(href src);
+
+sub _fold_parse_inline {
+    my($self, $ctx, @content) = @_;
+    my $t = q();
+    while (@content) {
+        my $x = shift @content;
+        my($f, @arg) = @{$x};
+        if ($f eq 'INLINE') {
+            $t .= $self->_parse_inline($ctx, $arg[0], 0);
+        }
+        elsif ($f eq 'PARSED') {
+            $t .= join q(), @arg;
+        }
+        elsif ($f eq 'CODE') {
+            my($filetype, $source) = @arg;
+            unshift @content, ['code', {}, _htmlall_escape($source)];
+        }
+        else {
+            my($h, @child) = @arg;
+            my($stag, $etag) = (qq(<$f), qq(</$f>));
+            for my $k (qw(id class href src rel rev alt title)) {
+                next if ! defined $h->{$k};
+                my $v = exists $HREFATTR{$k} ? _uri_escape($h->{$k})
+                      : _html_escape($h->{$k});
+                $stag .= qq( $k="$v");
+            }
+            if (exists $EMPTYELEMENT{$f}) {
+                $t .= $stag . q( />) . ($STAGNL{$f} || q());
+            }
+            else {
+                $stag .= q(>);
+                $stag .= $STAGNL{$f} || q();
+                $etag .= $ETAGNL{$f} || q();
+                unshift @content, ['PARSED', $stag], @child, ['PARSED', $etag];
+            }
+        }
+    }
+    return $t;
+}
+
+my $LEXINLINE = qr{
+    (.*?)       #1
+    (?: () \z   #2
+    |   \\(`+|[ ]+|[\\*_<>{}\[\]()\#+\-.!])     #3
+    |   (<!--.*?-->|</?\w[^>]+>)                #4
+    |   (`+)[ \t]*(.*?)[ \t]*\5                 #5 #6
+    |   (^|(?<=[ ]))?([*_]+)($|(?=[ ,.;:?!]))?    #7 #8 #9
+    |   ([!]?)\[($NEST_BRACKET)(?<!\\)\]               #10 #11
+        (   (?<!\\)[(] \s* (?:<([^>]*?)>|($NEST_PAREN))    #12 #13 #14
+            (?:\s* (?:"(.*?)"|'(.*?)'))? \s* (?<!\\)[)]    #15 #16
+        |   \s*\[($LINK_LABEL)?(?<!\\)\]               #17
+        )?
+    )
+}msx;
+my %EMPHASIS_TOKEN = (
+    q(*)   => [[1, q(*)]], q(**) => [[2, q(**)]], q(***) => [[3, q(***)]],
+    q(_)   => [[4, q(_)]], q(__) => [[5, q(__)]], q(___) => [[6, q(___)]],
+    q(*__) => [[1, q(*)],  [5, q(__)]],
+    q(**_) => [[2, q(**)], [4, q(_)]],
+    q(_**) => [[4, q(_)],  [2, q(**)]],
+    q(__*) => [[5, q(__)], [1, q(*)]],
+);
+my @EMPHASIS_DFA = (
+    [ 0,  1,  2,  3,  4,  5,  6],
+    [ 1,  0,  7,  1,  1,  8,  1],   # S0 '*'.S1 '*' S0
+    [ 2,  9,  0,  2, 10,  2,  2],   # S0 '**'.S2 '**' S0
+    [ 3,  2,  1,  0,  3,  3,  3],   # S0 '***'.S3 '***' S0
+    [ 4,  4, 11,  4,  0, 12,  4],   # S0 '_'.S4 '_' S0
+    [ 5, 13,  5,  5, 14,  0,  5],   # S0 '__'.S5 '__' S0
+    [ 6,  6,  6,  6,  5,  4,  0],   # S0 '___'.S6 '___' S0
+    [ 7,  7,  1,  0,  7,  7,  7],   # S0 '*' S1 '**'.S7 '**' S1 '*' S0
+    [ 8,  8,  8,  8,  8,  1,  8],   # S0 '*' S1 '__'.S8 '__' S1 '*' S0
+    [ 9,  2,  9,  0,  9,  9,  9],   # S0 '**' S2 '*'.S9 '*' S2 '**' S0
+    [10, 10, 10, 10,  2, 10, 10],   # S0 '**' S2 '_'.S10 '_' S2 '**' S0
+    [11, 11,  4, 11, 11, 11, 11],   # S0 '_' S4 '**'.S11 '**' S4 '_' S0
+    [12, 12, 12, 12, 12,  4,  0],   # S0 '_' S4 '__'.S12 '__' S4 '_' S0
+    [13,  5, 13, 13, 13, 13, 13],   # S0 '__' S5 '*'.S13 '*' S5 '__' S0
+    [14, 14, 14, 14,  5, 14,  0],   # S0 '__' S5 '_'.S14 '_' S5 '__' S0
+);
+my $EMPHASIS_MIDDLE = 0;
+my $EMPHASIS_LEFT = 1;
+my $EMPHASIS_RIGHT = 2;
+my $EMPHASIS_BOTH = 3;
+
+sub _parse_inline {
+    my($self, $ctx, $src, $already) = @_;
+    my $links = $ctx->{'reflink'};
+    my $emphasis = [0, 0, 0];
+    my $list = [];
+    while ($src =~ m/\G$LEXINLINE/gcmsxo) {
+        if ($1 ne q()) {
+            my $s = _html_escape($1);
+            $s =~ s{[ ][ ]\n}{<br />\n}gmsx;
+            push @{$list}, $s;
+        }
+        last if defined $2;
+        if (defined $3) {
+            push @{$list}, _htmlall_escape($3);
+        }
+        elsif (defined $4) {
+            push @{$list}, $self->_parse_angled($4);
+        }
+        elsif (defined $6) {
+            push @{$list}, '<code>'._htmlall_escape($6).'</code>';
+        }
+        elsif (defined $8) {
+            my $mark = $8;
+            my $side = (defined $7 ? $EMPHASIS_LEFT  : 0)
+                     + (defined $9 ? $EMPHASIS_RIGHT : 0);
+            if ($side == $EMPHASIS_BOTH
+                || ($self->{'middle_word_underscore'}
+                    && $side == $EMPHASIS_MIDDLE && $mark =~ m/\A_+\z/msx)
+                || ! exists $EMPHASIS_TOKEN{$mark}) {
+                push @{$list}, _htmlall_escape($mark);
+            }
+            else {
+                for (@{$EMPHASIS_TOKEN{$mark}}) {
+                    $self->_turn_emphasis_dfa($list, $emphasis, $side, @{$_});
+                }
+            }
+        }
+        elsif (defined $11) {
+            my $img = $10;
+            my $text = $11;
+            my $suffix = $12 || q();
+            my($uri, $title);
+            my $rel = q();
+            if (defined $13 || defined $14) {
+                $uri = defined $13 ? $13 : $14;
+                $title = defined $15 ? $15 : $16;
+            }
+            elsif (! $img && exists $ctx->{'footnote'}{$text}) {
+                my $fn = $ctx->{'footnote'}{$text};
+                $uri = $fn->{'href'};
+                $rel = q( rel="footnote");
+                $text = $fn->{'n'};
+            }
+            else {
+                my $linklabel = _linklabel(defined $17 ? $17 : $text);
+                my $a = $links->{$linklabel} || $links->{$text} || [];
+                ($uri, $title) = @{$a};
+            }
+            if (defined $title) {
+                my $t = _html_escape($title);
+                $title = qq( title="$t");
+            }
+            else {
+                $title = q();
+            }
+            my $s = q();
+            if (! $img && defined $uri && ! $already) {
+                $uri = _uri_escape($uri);
+                $s .= qq(<a href="$uri"$rel$title>);
+                $s .= $self->_parse_inline($ctx, $text, 1);
+                $s .= q(</a>);
+            }
+            elsif ($img && defined $uri) {
+                $uri = _uri_escape($uri);
+                $text = _html_escape($text);
+                $s .= qq(<img src="$uri" alt="$text"$title />);
+            }
+            else {
+                $s .= $img . q([);
+                $s .= $self->_parse_inline($ctx, $text, $already);
+                $s .= q(]) . $suffix;
+            }
+            push @{$list}, $s;
+        }
+    }
+    return join q(), @{$list};
+}
+
+sub _parse_angled {
+    my($self, $src) = @_;
+    if ($src =~ m{\A$HTML5_TAG\z}msx) {
+        # do nothing
+    }
+    elsif ($src =~ m{
+        <(?:mailto:)?([-.\w+]+\@[-\w]+(?:[.][-\w]+)*[.][$LOWER]+)>
+    }msx) {
+        my $href = _mail_escape('mailto:' . $1);
+        my $text = _mail_escape($1);
+        $src = qq{<a href="$href">$text</a>};
+    }
+    elsif ($src =~ m{\A<(\S+)>\z}msx) {
+        my $href = _uri_escape($1);
+        my $text = _html_escape($1);
+        $src = qq(<a href="$href">$text</a>);
     }
     else {
-        push @{$c->{token}}, qq(<a href="$link"$title>);
-        $c->{str} .= q(<) . $#{$c->{token}} . q(>);
-        $self->_iilex($c, $text, %already, 'link' => 1);
-        push @{$c->{token}}, q(</a>);
-        $c->{str} .= q(<) . $#{$c->{token}} . q(>);
+        $src = _escape_html($src);
+    }
+    return $src;
+}
+
+sub _turn_emphasis_dfa {
+    my($self, $list, $emphasis, $side, $token, $mark) = @_;
+    my($state, $match1, $match2) = @{$emphasis};
+    my $jump = $EMPHASIS_DFA[$state][$token];
+    push @{$list}, $mark;
+    return if $state == $jump;
+    return if $state < $jump && $side == $EMPHASIS_RIGHT;
+    return if $state > $jump && $side == $EMPHASIS_LEFT;
+    $emphasis->[0] = $jump;
+
+    if ($state == 0) {
+        $emphasis->[1] = $#{$list};
+        if ($jump == 3 || $jump == 6) {
+            push @{$list}, q();
+            $emphasis->[2] = $#{$list};
+        }
+    }
+    elsif ($state == 1 || $state == 4) {
+        if ($jump == 0) {
+            $list->[$match1] = '<em>';
+            $list->[-1] = '</em>';
+        }
+        else {
+            $emphasis->[2] = $#{$list};
+        }
+    }
+    elsif ($state == 2 || $state == 5) {
+        if ($jump == 0) {
+            $list->[$match1] = '<strong>';
+            $list->[-1] = '</strong>';
+        }
+        else {
+            $emphasis->[2] = $#{$list};
+        }
+    }
+    elsif ($state == 7 || $state == 12) {
+        if ($jump == 0) {
+            $list->[$match2] = '<strong>';
+            $list->[-1] = '</strong>';
+            $list->[$match1] = '<em>';
+            push @{$list}, '</em>';
+        }
+    }
+    elsif ($state == 3 || $state == 6 || $state == 9 || $state == 14) {
+        if ($jump == 0) {
+            $list->[$match2] = '<em>';
+            $list->[-1] = '</em>';
+            $list->[$match1] = '<strong>';
+            push @{$list}, '</strong>';
+        }
+    }
+    if ($state > 0 && ($jump == 1 || $jump == 4)) {
+        $list->[$match2] = '<strong>';
+        $list->[-1] = '</strong>';
+        if ($state == 3 || $state == 6) {
+            my $mark1 = substr $list->[$match1], 0, 1;
+            $list->[$match1] = $mark1;
+        }
+    }
+    elsif ($state > 0 && ($jump == 2 || $jump == 5)) {
+        $list->[$match2] = '<em>';
+        $list->[-1] = '</em>';
+        if ($state == 3 || $state == 6) {
+            my $mark1 = substr $list->[$match1], 0, 2;
+            $list->[$match1] = $mark1;
+        }
     }
     return;
 }
@@ -398,7 +611,7 @@ Text::Mkdown - Core Markdown to XHTML text converter.
 
 =head1 VERSION
 
-0.009
+0.01
 
 =head1 SYNOPSIS
 
@@ -428,25 +641,17 @@ Text::Mkdown - Core Markdown to XHTML text converter.
 
 Nesting level of square brackets or parences is up to 6.
 
-Not implement single square bracketed link.
-
-    isnt link [foo].
-    is link [foo][].
-
-      [foo]: /example.net/?foo "wiki"
-
-produces:
-
-    <p>isnt link [foo].
-    is link <a href="/example.net/?foo" title="wiki">foo</a>.</p>
-
-Not implement markdown attributes.
+Not implement PHP markdown attributes.
 
     <div markdown="1">**strong**</div>
 
 produces:
 
     <div markdown="1">**strong**</div>
+
+Not implements PHP extra abbr.
+
+Not implements PHP extra tables.
 
 =head1 DEPENDENCIES
 
@@ -463,7 +668,7 @@ MIZUTANI Tociyuki  C<< <tociyuki\x40gmail.com> >>
 
 =head1 LICENSE AND COPYRIGHT
 
-Copyright (c) 2012, MIZUTANI Tociyuki C<< <tociyuki@gmail.com> >>.
+Copyright (c) 2013, MIZUTANI Tociyuki C<< <tociyuki@gmail.com> >>.
 All rights reserved.
 
 This module is free software; you can redistribute it and/or
