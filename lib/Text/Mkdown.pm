@@ -338,8 +338,8 @@ sub _iitag {
     }msx) {
         my $href = 'mailto:' . $1;
         my $text = $1;
-        $href =~ s{(.)}{ $self->_encode_mailchar($1) }egmosx;
-        $text =~ s{(.)}{ $self->_encode_mailchar($1) }egmosx;
+        $href =~ s{(.)}{ _encode_mailchar($1) }egmosx;
+        $text =~ s{(.)}{ _encode_mailchar($1) }egmosx;
         $tag = qq{<a href="$href">$text</a>};
     }
     elsif ($tag =~ m{\A<(\S+)>\z}msx) {

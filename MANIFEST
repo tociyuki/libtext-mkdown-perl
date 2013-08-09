@@ -332,8 +332,8 @@ t/PHP_Markdown-from-MDTest1.1.mdtest/Code_Spans.text
 t/PHP_Markdown-from-MDTest1.1.mdtest/Code_Spans.xhtml
 t/PHP_Markdown-from-MDTest1.1.mdtest/Email_auto_links-todo.text
 t/PHP_Markdown-from-MDTest1.1.mdtest/Email_auto_links-todo.xhtml
-t/PHP_Markdown-from-MDTest1.1.mdtest/Emphasis-todo.text
-t/PHP_Markdown-from-MDTest1.1.mdtest/Emphasis-todo.xhtml
+t/PHP_Markdown-from-MDTest1.1.mdtest/Emphasis.text
+t/PHP_Markdown-from-MDTest1.1.mdtest/Emphasis.xhtml
 t/PHP_Markdown-from-MDTest1.1.mdtest/Headers.text
 t/PHP_Markdown-from-MDTest1.1.mdtest/Headers.xhtml
 t/PHP_Markdown-from-MDTest1.1.mdtest/Horizontal_Rules.text
