@@ -6,7 +6,7 @@ use Carp;
 use Encode;
 use parent qw(Exporter);
 
-use version; our $VERSION = '0.01';
+our $VERSION = '0.011';
 # $Id$
 
 our @EXPORT_OK = qw(markdown);
@@ -85,9 +85,9 @@ my $HRULE = qr{(?:[*][ \t]*){3,}|(?:[-][ \t]*){3,}|(?:[_][ \t]*){3,}}msx;
 my $LAZY = qr{(?!(?:[>\#]|[*+\-:][ \t]|[$DIGIT]+[.][ \t]|$HRULE\n))\S[^\n]*}msx;
 my $LAZYINDENTS = qr{
     \S[^\n]*\n (?:$PAD $LAZY\n)*
-    (?:(?:[ \t]*\n)*(?:$TAB [^\n]*\n(?:$PAD $LAZY\n)*)+)*
+    (?:\n*(?:$TAB [^\n]*\n(?:$PAD $LAZY\n)*)+)*
 }msx;
-my $INDENTS = qr/(?:$TAB [ \t]*\S[^\n]*\n)*(?:(?:[ \t]*\n)+(?:$TAB [ \t]*\S[^\n]*\n)+)*/msx;
+my $INDENTS = qr/(?:$TAB [ \t]*\S[^\n]*\n)*(?:\n+(?:$TAB [ \t]*\S[^\n]*\n)+)*/msx;
 my $BLOCKQUOTE = qr/$PAD >[^\n]*\n(?:$PAD $LAZY\n)*/msx;
 
 my $LEXTOPLEVEL = qr{
@@ -109,38 +109,38 @@ my $LEXTOPLEVEL = qr{
 }msx;
 
 my $LEXBLOCK = qr{
-    (?: () (?:[ \t]*\n)+  #1
+    (?: () \n+   #1
     |   ($TAB [^\n]*\n$INDENTS)       #2
-    |   ($BLOCKQUOTE+(?:(?:[ \t]*\n)+$BLOCKQUOTE+)*) #3
+    |   ($BLOCKQUOTE+(?:\n+$BLOCKQUOTE+)*)  #3
     |   () $PAD $HRULE\n         #4
     |   $PAD [*+\-][ \t]+ ($LAZYINDENTS)        #5
     |   $PAD [$DIGIT]+[.][ \t]+ ($LAZYINDENTS)  #6
     |   $PAD (\#{1,6})\#*[ \t]*(\S[^\n]*?)\s*(?:\#+\s*)?\n     #7 #8
     |   $PAD (\S[^\n]*)\n$PAD (=|-)\10*\n       #9 #10
     |   ((?:$PAD [^\s:][^\n]*\n)+)
-        (?:(?:[ \t]*\n)*$PAD :[ \t]+($LAZYINDENTS))? #11 #12
+        (?:\n*$PAD :[ \t]+($LAZYINDENTS))? #11 #12
     )
 }msx;
 
 my $LEXLISTITEM = qr{
-    (?: () (?:[ \t]*\n)+  #1
+    (?: () \n+  #1
     |   ($TAB [^\n]*\n$INDENTS)       #2
-    |   ($BLOCKQUOTE+(?:(?:[ \t]*\n)+$BLOCKQUOTE+)*) #3
+    |   ($BLOCKQUOTE+(?:\n+$BLOCKQUOTE+)*) #3
     |   () $PAD $HRULE\n         #4
     |   $PAD [*+\-][ \t]+ ($LAZYINDENTS)        #5
     |   $PAD [$DIGIT]+[.][ \t]+ ($LAZYINDENTS)  #6
     |   $PAD (\#{1,6})\#*[ \t]*(\S[^\n]*?)\s*(?:\#+\s*)?\n     #7 #8
     |   $PAD (\S[^\n]*)\n$PAD (=|-)\10*\n       #9 #10
     |   ((?:$PAD $LAZY\n)+)
-        (?:(?:[ \t]*\n)*$PAD :[ \t]+($LAZYINDENTS))? #11 #12
+        (?:\n*$PAD :[ \t]+($LAZYINDENTS))? #11 #12
     )
 }msx;
 
-my $LEXUL = qr{(?:[ \t]*\n)*$PAD (?!(?:$HRULE\n))[*+\-][ \t]+($LAZYINDENTS)}msx;
-my $LEXOL = qr{(?:[ \t]*\n)*$PAD [$DIGIT]+[.][ \t]+($LAZYINDENTS)}msx;
+my $LEXUL = qr{\n*$PAD (?!(?:$HRULE\n))[*+\-][ \t]+($LAZYINDENTS)}msx;
+my $LEXOL = qr{\n*$PAD [$DIGIT]+[.][ \t]+($LAZYINDENTS)}msx;
 my $LEXDL = qr{
-    (?:[ \t]*\n)*
-    (?: ((?:$PAD $LAZY\n)+)(?:[ \t]*\n)* )?
+    \n*
+    (?: ((?:$PAD $LAZY\n)+)\n* )?
     $PAD :[ \t]+($LAZYINDENTS)
 }msx;
 
@@ -197,8 +197,18 @@ sub _parse_blockseq {
 }
 
 sub _parse_listitem {
-    my($self, $ctx, $src) = @_;
-    $src =~ s/^$TAB//gmsx;
+    my($self, $ctx, $src0) = @_;
+    $src0 = q(    ) . $src0;
+    my $lazy = q();
+    my $src = q();
+    while ($src0 =~ m/\G(?:($PAD\S[^\n]*\n)|(\n)|$TAB([^\n]*\n))/gcmsx) {
+        my $n = $#-;
+        if ($lazy && $n == 3) {
+            $src .= "\n";
+        }
+        $src .= $+;
+        $lazy = $n == 1;
+    }
     chomp $src;
     $src = "$src\n\n";
     my @list;
@@ -268,21 +278,22 @@ sub _parse_block {
         elsif (defined $3) {
             my $s = $3;
             my $t = q();
-            my $lazy = 0;
-            while ($s =~ m/\G$PAD (>[ \t]?)?([^\n]*\n)/gcmsxo) {
-                if ($1 && $lazy) {
+            my $lazy = q();
+            while ($s =~ m{\G
+                (?:$PAD[>][ ]*(\n)|$PAD[>][ ]?([^\n]*\n)|[ ]*(\n)|$PAD(\S[^\n]*\n))
+            }gcmsx) {
+                my $n = $#-;
+                if ($lazy && $n == 2) {
                     $t .= "\n";
                 }
-                $lazy = ! $1;
-                $t .= $2;
+                $t .= $+;
+                $lazy = $n == 4;
             }
-            $t =~ s/^[ \t]+$//gmsx;
             push @{$list}, ['blockquote', {}, $self->_parse_blockseq($ctx, $t)];
         }
         elsif (defined $2) {
             my $s = $2;
             $s =~ s/^$TAB//gmsxo;
-            $s =~ s/^[ \t]+$//gmsxo;
             push @{$list}, ['pre', {}, ['code', {}, ['PARSED', _htmlall_escape($s)]]];
         }
         return 1;
@@ -618,7 +629,7 @@ Text::Mkdown - Core Markdown to XHTML text converter.
 
 =head1 VERSION
 
-0.01
+0.011
 
 =head1 SYNOPSIS
 
