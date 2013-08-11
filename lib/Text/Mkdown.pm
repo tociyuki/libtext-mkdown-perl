@@ -6,7 +6,7 @@ use Carp;
 use Encode;
 use parent qw(Exporter);
 
-our $VERSION = '0.011';
+our $VERSION = '0.012';
 # $Id$
 
 our @EXPORT_OK = qw(markdown);
@@ -355,7 +355,7 @@ sub _fold_parse_inline {
         }
         elsif ($f eq 'CODE') {
             my($filetype, $source) = @arg;
-            unshift @content, ['code', {}, _htmlall_escape($source)];
+            unshift @content, ['code', {}, ['PARSED', _htmlall_escape($source)]];
         }
         else {
             my($h, @child) = @arg;
@@ -629,7 +629,7 @@ Text::Mkdown - Core Markdown to XHTML text converter.
 
 =head1 VERSION
 
-0.011
+0.012
 
 =head1 SYNOPSIS
 

@@ -21,6 +21,7 @@ t/50.definition-lists.t
 t/51.footnote.t
 t/52.middle-word-underscore.t
 t/53.lazylines.t
+t/54.fencedcode.t
 t/code-hr.t
 t/docs-maruku-unittest/abbreviations.html
 t/docs-maruku-unittest/abbreviations.text

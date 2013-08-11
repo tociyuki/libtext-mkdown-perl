@@ -1,5 +1,8 @@
 Revision history for Text-Mkdown
 
+0.012   Sun Aug 11 10:58:31 2013
+    ! FIX: die on fences code block ```\n.*?\n```\n
+
 0.011   Sat Aug 10 00:26:30 2013
     ! rigid works for lazy style and blank lines.
 
