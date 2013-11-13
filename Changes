@@ -1,5 +1,8 @@
 Revision history for Text-Mkdown
 
+0.014   Wed Nov 13 13:22:32 2013
+    ! FIX: correct _html_escape() calling in _parse_angled().
+
 0.013   Wed Nov 13 00:15:25 2013
     ! FIX: add \\ escaping for inline image markup.
 

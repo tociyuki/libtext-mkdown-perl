@@ -6,7 +6,7 @@ use Carp;
 use Encode;
 use parent qw(Exporter);
 
-our $VERSION = '0.013';
+our $VERSION = '0.014';
 # $Id$
 
 our @EXPORT_OK = qw(markdown);
@@ -517,7 +517,7 @@ sub _parse_angled {
         $src = qq(<a href="$href">$text</a>);
     }
     else {
-        $src = _escape_html($src);
+        $src = _html_escape($src);
     }
     return $src;
 }
@@ -632,7 +632,7 @@ Text::Mkdown - Core Markdown to XHTML text converter.
 
 =head1 VERSION
 
-0.012
+0.014
 
 =head1 SYNOPSIS
 
