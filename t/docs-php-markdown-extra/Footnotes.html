@@ -1,20 +1,30 @@
 <p>This is the first paragraph.<a href="#fn:first" rel="footnote">1</a></p>
+
 <ul>
 <li>List item one.<a href="#fn:second" rel="footnote">3</a></li>
 <li>List item two.<a href="#fn:third" rel="footnote">2</a></li>
 </ul>
+
 <h1>Header<a href="#fn:fourth" rel="footnote">4</a></h1>
+
 <p>Some paragraph with a footnote<a href="#fn:1" rel="footnote">5</a>, and another<a href="#fn:2" rel="footnote">6</a>.</p>
+
 <p>Another paragraph with a named footnote<a href="#fn:fn-name" rel="footnote">7</a>.</p>
+
 <p>This paragraph should not have a footnote marker since 
 the footnote is undefined.[^3]</p>
+
 <p>This paragraph should not have a footnote marker since 
 the footnote has already been used before.<a href="#fn:1" rel="footnote">5</a></p>
+
 <p>This paragraph links to a footnote with plenty of 
 block-level content.<a href="#fn:block" rel="footnote">8</a></p>
+
 <p>This paragraph host the footnote reference within a 
 footnote test<a href="#fn:reference" rel="footnote">9</a>.</p>
+
 <hr />
+
 <ol class="footnote">
 <li id="fn:first">This is the first note.</li>
 <li id="fn:third">This is the third note, defined out of order.</li>
@@ -29,11 +39,12 @@ three lines, with some span-level markup like
 <ul>
 <li>List item</li>
 </ul>
+
 <blockquote>
 <p>Blockquote</p>
 </blockquote>
-<pre><code>Code block
-</code></pre>
+
+<pre><code>Code block</code></pre>
 </li>
 <li id="fn:reference">This footnote attemps to refer to another footnote. This 
 should be impossible.<a href="#fn:impossible" rel="footnote">10</a></li>

@@ -1,5 +1,10 @@
 Revision history for Text-Mkdown
 
+0.015   Wed Nov 13 13:29:50 2013
+    ! simplify all parsers.
+    ! add blank line between block elements.
+    ! treat the sequences of lazy lines as like as a soft breaked line.
+
 0.014   Wed Nov 13 13:22:32 2013
     ! FIX: correct _html_escape() calling in _parse_angled().
 

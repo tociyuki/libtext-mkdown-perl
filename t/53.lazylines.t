@@ -3,7 +3,7 @@ use warnings;
 use Test::More;
 use Test::Differences;
 
-plan 'no_plan';
+plan tests => 14;
 
 use_ok 'Text::Mkdown';
 
@@ -134,8 +134,14 @@ over
 the lazy dog.
 <pre><code>foo
 
-and foo.
-</code></pre>
+and foo.</code></pre>
+</li>
+<li>quick brown
+fox jumps
+over
+the lazy dog.
+    foo
+<pre><code>and foo.</code></pre>
 </li>
 <li>quick brown
 fox jumps
@@ -143,17 +149,7 @@ over
 the lazy dog.
 <pre><code>foo
 
-and foo.
-</code></pre>
-</li>
-<li>quick brown
-fox jumps
-over
-the lazy dog.
-<pre><code>foo
-
-and foo.
-</code></pre>
+and foo.</code></pre>
 </li>
 </ul>
 EOF
@@ -174,6 +170,7 @@ eq_or_diff $got, <<'EOF', $spec;
 <p>paragraph 1 line 1.
 paragraph 1 line 2.
 paragraph 1 line 3.</p>
+
 <p>paragraph 2 line 1.
 paragraph 2 line 2.
 paragraph 2 line 3.</p>
@@ -196,6 +193,7 @@ eq_or_diff $got, <<'EOF', $spec;
 <p>paragraph 1 line 1.
 paragraph 1 lazy line 2.
 paragraph 1 lazy line 3.</p>
+
 <p>paragraph 2 line 1.
 paragraph 2 lazy line 2.
 paragraph 2 lazy line 3.</p>
@@ -218,6 +216,7 @@ eq_or_diff $got, <<'EOF', $spec;
 <p>paragraph 1 line 1.
 paragraph 1 lazy line 2.
 paragraph 1 lazy line 3.</p>
+
 <p>paragraph 2 line 1.
 paragraph 2 lazy line 2.
 paragraph 2 lazy line 3.</p>
@@ -238,8 +237,8 @@ eq_or_diff $got, <<'EOF', $spec;
 <blockquote>
 <p>paragraph 1 line 1.
 paragraph 1 lazy line 2.
-paragraph 1 lazy line 3.</p>
-<p>paragraph 2 line 1.
+paragraph 1 lazy line 3.
+paragraph 2 line 1.
 paragraph 2 lazy line 2.
 paragraph 2 lazy line 3.</p>
 </blockquote>
@@ -263,10 +262,10 @@ eq_or_diff $got, <<'EOF', $spec;
 fox jumps
 over
 the lazy dog.</p>
+
 <pre><code>foo
 
-and foo.
-</code></pre>
+and foo.</code></pre>
 </blockquote>
 EOF
 
@@ -288,10 +287,10 @@ eq_or_diff $got, <<'EOF', $spec;
 fox jumps
 over
 the lazy dog.</p>
+
 <pre><code>foo
 
-and foo.
-</code></pre>
+and foo.</code></pre>
 </blockquote>
 EOF
 
@@ -313,10 +312,10 @@ eq_or_diff $got, <<'EOF', $spec;
 fox jumps
 over
 the lazy dog.</p>
+
 <pre><code>foo
 
-and foo.
-</code></pre>
+and foo.</code></pre>
 </blockquote>
 EOF
 
@@ -336,11 +335,10 @@ eq_or_diff $got, <<'EOF', $spec;
 <p>quick brown
 fox jumps
 over
-the lazy dog.</p>
-<pre><code>foo
+the lazy dog.
+    foo</p>
 
-and foo.
-</code></pre>
+<pre><code>and foo.</code></pre>
 </blockquote>
 EOF
 

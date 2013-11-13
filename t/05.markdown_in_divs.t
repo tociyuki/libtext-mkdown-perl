@@ -24,9 +24,6 @@ and _underscores_
 </h2>
 EOF
 
-SKIP: {
-    skip 'markdown attribute is not core markdown feature', 2;
-
 #-------------------------------------------------------------------------------
 $test = 'markdown on in div - generate <p> tags';
 $html = $m->markdown(<<"EOF");
@@ -65,7 +62,6 @@ Interpreted *asterisks*
 and _underscores_
 </h2>
 EOF
-}
 
 #-------------------------------------------------------------------------------
 # "block-level HTML elements — e.g. <div>, <table>, <pre>, <p>, etc. — must be separated
@@ -155,10 +151,10 @@ A `<div markdown="1">` will interpret Markdown, unless in a code block.
 EOF
 eq_or_diff $html, <<'EOF', $test;
 <p>A <code>&lt;div markdown=&quot;1&quot;&gt;</code> will interpret Markdown, unless in a code block.</p>
+
 <pre><code>&lt;div markdown=&quot;1&quot;&gt;
 The *above* is a &#39;&lt;div&gt;&#39; tag
-in a code block&lt;/div&gt;
-</code></pre>
+in a code block&lt;/div&gt;</code></pre>
 EOF
 
 
@@ -186,8 +182,7 @@ EOF
 eq_or_diff $html, <<'EOF', $test;
 <pre><code>!div markdown=&quot;1&quot;!
 The above is NOT a &lt;div&gt;!
-&lt;/div&gt;
-</code></pre>
+&lt;/div&gt;</code></pre>
 EOF
 
 #-------------------------------------------------------------------------------
@@ -438,7 +433,8 @@ Above was code
 EOF
 eq_or_diff $html, <<'EOF', $test;
 <p>Below is code</p>
-<pre><code>code
-</code></pre>
+
+<pre><code>code</code></pre>
+
 <p>Above was code</p>
 EOF
