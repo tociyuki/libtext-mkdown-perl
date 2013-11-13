@@ -6,7 +6,7 @@ use Carp;
 use Encode;
 use parent qw(Exporter);
 
-our $VERSION = '0.012';
+our $VERSION = '0.013';
 # $Id$
 
 our @EXPORT_OK = qw(markdown);
@@ -294,7 +294,7 @@ sub _parse_block {
         elsif (defined $2) {
             my $s = $2;
             $s =~ s/^$TAB//gmsxo;
-            push @{$list}, ['pre', {}, ['code', {}, ['PARSED', _htmlall_escape($s)]]];
+            push @{$list}, ['pre', {}, ['CODE', q(), $s]];
         }
         return 1;
     }
@@ -387,10 +387,10 @@ my $LEXINLINE = qr{
     |   (<!--.*?-->|</?\w[^>]+>)                #4
     |   (`+)[ \t]*(.*?)[ \t]*\5                 #5 #6
     |   (^|(?<=[ ]))?([*_]+)($|(?=[ ,.;:?!]))?    #7 #8 #9
-    |   ([!]?)\[($NEST_BRACKET)(?<!\\)\]               #10 #11
-        (   (?<!\\)[(] \s* (?:<([^>]*?)>|($NEST_PAREN))    #12 #13 #14
-            (?:\s* (?:"(.*?)"|'(.*?)'))? \s* (?<!\\)[)]    #15 #16
-        |   \s*\[($LINK_LABEL)?(?<!\\)\]               #17
+    |   ([!]?)(?<!\\)\[($NEST_BRACKET)(?<!\\)\] #10 #11
+        (   (?<!\\)[(] \s* (?:<([^>]*?)>|($NEST_PAREN))     #12 #13 #14
+            (?:\s* (?:"(.*?)"|'(.*?)'))? \s* (?<!\\)[)]  #15 #16
+        |   \s*(?<!\\)\[($LINK_LABEL)?(?<!\\)\]               #17
         )?
     )
 }msx;
@@ -455,15 +455,18 @@ sub _parse_inline {
                 $uri = defined $13 ? $13 : $14;
                 $title = defined $15 ? $15 : $16;
             }
-            elsif (! $img && exists $ctx->{'footnote'}{$text}) {
-                my $fn = $ctx->{'footnote'}{$text};
-                $uri = $fn->{'href'};
-                $rel = q( rel="footnote");
-                $text = $fn->{'n'};
+            elsif (! $img && $text =~ m/\A(\^$LINK_LABEL)\z/msx) {
+                my $linklabel = _linklabel($1);
+                if (exists $ctx->{'footnote'}{$linklabel}) {
+                    my $fn = $ctx->{'footnote'}{$linklabel};
+                    $uri = $fn->{'href'};
+                    $rel = q( rel="footnote");
+                    $text = $fn->{'n'};
+                }
             }
             else {
-                my $linklabel = _linklabel(defined $17 ? $17 : $text);
-                my $a = $links->{$linklabel} || $links->{$text} || [];
+                my $k = _linklabel(defined $17 && $17 ne q() ? $17 : $text);
+                my $a = $links->{$k} || [];
                 ($uri, $title) = @{$a};
             }
             if (defined $title) {
